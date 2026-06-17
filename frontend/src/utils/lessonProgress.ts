@@ -5,7 +5,10 @@
 
 export function resolveDwellSeconds(raw: unknown, fallback = 30): number | null {
 	const n = Number(raw ?? fallback)
-	if (!Number.isFinite(n) || n <= 0) return null
+	if (!Number.isFinite(n) || n < 0) return null
+	// 0  → mark immediately on page load
+	// >0 → wait N seconds before marking
+	// <0 or NaN → null (auto-complete disabled)
 	return n
 }
 

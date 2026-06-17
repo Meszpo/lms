@@ -1,0 +1,169 @@
+{
+ "actions": [],
+ "allow_import": 1,
+ "allow_rename": 1,
+ "autoname": "field:title",
+ "creation": "2026-06-16 10:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "title",
+  "lab_connection",
+  "column_break_1",
+  "passing_percentage",
+  "max_attempts",
+  "max_session_minutes",
+  "company_prefix",
+  "section_break_desc",
+  "description",
+  "section_break_roles",
+  "roles",
+  "section_break_steps",
+  "steps",
+  "section_break_criteria",
+  "evaluation_criteria"
+ ],
+ "fields": [
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Title",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "lab_connection",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Lab Connection",
+   "options": "LMS Lab Connection",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "70",
+   "fieldname": "passing_percentage",
+   "fieldtype": "Float",
+   "label": "Passing Percentage",
+   "non_negative": 1,
+   "reqd": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "max_attempts",
+   "fieldtype": "Int",
+   "label": "Max Attempts",
+   "description": "0 = unlimited",
+   "non_negative": 1
+  },
+  {
+   "default": "60",
+   "fieldname": "max_session_minutes",
+   "fieldtype": "Int",
+   "label": "Max Session Minutes",
+   "description": "Session expires after this many minutes. Environment is cleaned up automatically.",
+   "non_negative": 1,
+   "reqd": 1
+  },
+  {
+   "default": "Lab",
+   "fieldname": "company_prefix",
+   "fieldtype": "Data",
+   "label": "Company Name Prefix",
+   "description": "Prefix for generated company names (e.g. 'Lab' → 'Lab_john_doe_abc12345')"
+  },
+  {
+   "fieldname": "section_break_desc",
+   "fieldtype": "Section Break",
+   "label": "Description"
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Long Text",
+   "label": "Lab Description"
+  },
+  {
+   "fieldname": "section_break_roles",
+   "fieldtype": "Section Break",
+   "label": "User Roles"
+  },
+  {
+   "fieldname": "roles",
+   "fieldtype": "Table",
+   "label": "Roles",
+   "options": "LMS Lab Role",
+   "description": "Roles assigned to the provisioned student user on the external system. Defaults to 'System Manager' if none specified."
+  },
+  {
+   "fieldname": "section_break_steps",
+   "fieldtype": "Section Break",
+   "label": "Steps"
+  },
+  {
+   "fieldname": "steps",
+   "fieldtype": "Table",
+   "label": "Steps",
+   "options": "LMS Lab Step"
+  },
+  {
+   "fieldname": "section_break_criteria",
+   "fieldtype": "Section Break",
+   "label": "Evaluation Criteria"
+  },
+  {
+   "fieldname": "evaluation_criteria",
+   "fieldtype": "Table",
+   "label": "Evaluation Criteria",
+   "options": "LMS Lab Evaluation Criterion"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-06-16 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "LMS",
+ "name": "LMS Lab",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Course Creator",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "LMS Student"
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "title",
+ "track_changes": 1
+}

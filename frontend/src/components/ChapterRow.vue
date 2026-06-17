@@ -72,8 +72,12 @@
 							@click="onLessonClick(lesson)"
 						>
 							<div class="flex items-center text-sm leading-5 group">
+								<FlaskConical
+									v-if="lesson.lab_id"
+									class="h-4 w-4 stroke-1 me-2 text-blue-500"
+								/>
 								<MonitorPlay
-									v-if="lesson.icon === 'icon-youtube'"
+									v-else-if="lesson.icon === 'icon-youtube'"
 									class="h-4 w-4 stroke-1 me-2"
 								/>
 								<HelpCircle
@@ -137,6 +141,7 @@ import {
 	Check,
 	FilePenLine,
 	FileText,
+	FlaskConical,
 	HelpCircle,
 	MonitorPlay,
 	NotebookPen,

@@ -74,6 +74,7 @@ export interface OutlineLesson {
 	number: string
 	icon?: string
 	is_complete?: boolean
+	lab_id?: string | null
 }
 
 export interface OutlineChapter {

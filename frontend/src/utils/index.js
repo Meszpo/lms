@@ -544,6 +544,15 @@ const getSidebarItems = (forMobile = false) => {
 					],
 				},
 				{
+					label: 'Labs',
+					icon: 'FlaskConical',
+					to: 'Labs',
+					condition: () => {
+						return !forMobile && isAdmin()
+					},
+					activeFor: ['Labs', 'LabForm'],
+				},
+				{
 					label: 'Assignments',
 					icon: 'Pencil',
 					to: 'Assignments',

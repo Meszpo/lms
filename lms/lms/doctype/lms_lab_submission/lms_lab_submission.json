@@ -1,0 +1,185 @@
+{
+ "actions": [],
+ "creation": "2026-06-16 10:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "lab",
+  "lab_title",
+  "member",
+  "member_name",
+  "column_break_1",
+  "lesson",
+  "course",
+  "submission_time",
+  "section_break_score",
+  "score",
+  "max_score",
+  "column_break_score",
+  "percentage",
+  "passing_percentage",
+  "status",
+  "section_break_results",
+  "results"
+ ],
+ "fields": [
+  {
+   "fieldname": "lab",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Lab",
+   "options": "LMS Lab",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "lab.title",
+   "fieldname": "lab_title",
+   "fieldtype": "Data",
+   "label": "Lab Title",
+   "read_only": 1
+  },
+  {
+   "fieldname": "member",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Member",
+   "options": "User",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fetch_from": "member.full_name",
+   "fieldname": "member_name",
+   "fieldtype": "Data",
+   "label": "Member Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "lesson",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Lesson",
+   "options": "Course Lesson",
+   "reqd": 1
+  },
+  {
+   "fieldname": "course",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Course",
+   "options": "LMS Course"
+  },
+  {
+   "fieldname": "submission_time",
+   "fieldtype": "Datetime",
+   "label": "Submission Time",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_break_score",
+   "fieldtype": "Section Break",
+   "label": "Score"
+  },
+  {
+   "default": "0",
+   "fieldname": "score",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Score",
+   "non_negative": 1,
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "max_score",
+   "fieldtype": "Float",
+   "label": "Max Score",
+   "non_negative": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_score",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "percentage",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Percentage",
+   "non_negative": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "passing_percentage",
+   "fieldtype": "Float",
+   "label": "Passing Percentage",
+   "read_only": 1
+  },
+  {
+   "default": "Fail",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Status",
+   "options": "Pass\nFail",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_break_results",
+   "fieldtype": "Section Break",
+   "label": "Results"
+  },
+  {
+   "fieldname": "results",
+   "fieldtype": "Table",
+   "label": "Results",
+   "options": "LMS Lab Result"
+  }
+ ],
+ "in_create": 1,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-06-16 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "LMS",
+ "name": "LMS Lab Submission",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "if_owner": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "LMS Student",
+   "share": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "lab_title",
+ "track_changes": 1
+}

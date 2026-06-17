@@ -84,7 +84,10 @@ def get_exercise_test_cases(doc):
 
 def get_assessments_from_lesson(lesson):
 	assessments, questions, test_cases = [], [], []
-	content = json.loads(lesson.content) if lesson.content else {}
+	try:
+		content = json.loads(lesson.content) if lesson.content else {}
+	except (json.JSONDecodeError, TypeError):
+		content = {}
 	for block in content.get("blocks", []):
 		if block.get("type") not in ("quiz", "assignment", "program"):
 			continue
@@ -136,7 +139,10 @@ def get_course_assets(course, lessons, instructors, evaluator):
 	if course.image:
 		assets.append(course.image)
 	for lesson in lessons:
-		content = json.loads(lesson.content) if lesson.content else {}
+		try:
+			content = json.loads(lesson.content) if lesson.content else {}
+		except (json.JSONDecodeError, TypeError):
+			content = {}
 		for block in content.get("blocks", []):
 			if block.get("type") == "upload":
 				url = block.get("data", {}).get("file_url")

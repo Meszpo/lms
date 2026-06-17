@@ -590,6 +590,9 @@ def delete_lesson(lesson: str, chapter: str):
 	update_index(lessons, chapter)
 
 	frappe.db.delete("LMS Course Progress", {"lesson": lesson})
+	frappe.db.set_value(
+		"LMS Enrollment", {"current_lesson": lesson}, "current_lesson", None
+	)
 	frappe.delete_doc("Course Lesson", lesson)
 
 
@@ -985,6 +988,9 @@ def delete_course(course: str):
 				frappe.db.delete("Discussion Reply", {"topic": topic})
 				frappe.db.delete("Discussion Topic", topic)
 
+			frappe.db.set_value(
+				"LMS Enrollment", {"current_lesson": lesson}, "current_lesson", None
+			)
 			frappe.delete_doc("Course Lesson", lesson)
 
 	for chapter in chapters:
@@ -2513,3 +2519,109 @@ def export_course_as_zip(course_name: str):
 def import_course_from_zip(zip_file_path: str):
 	frappe.only_for(["Moderator", "Course Creator"])
 	return import_course_zip(zip_file_path)
+
+
+# ── Interactive Lab API ────────────────────────────────────────────────────────
+
+@frappe.whitelist()
+def get_lab_info(lab: str):
+	"""Returns public metadata (title, description) for a lab — no provisioning required."""
+	data = frappe.db.get_value("LMS Lab", lab, ["title", "description"], as_dict=True)
+	if not data:
+		frappe.throw(frappe._("Lab {0} not found").format(lab))
+	return data
+
+
+@frappe.whitelist()
+def provision_lab_instance(lab: str, course: str, lesson: str):
+	from lms.lms.lab import provision_lab_instance as _provision
+	return _provision(lab=lab, course=course, lesson=lesson)
+
+
+@frappe.whitelist()
+def get_lab_instance(lab: str):
+	from lms.lms.lab import get_lab_instance as _get
+	return _get(lab=lab)
+
+
+@frappe.whitelist()
+def navigate_lab_step(lab_instance: str, direction: str = None, step: int = None):
+	from lms.lms.lab import navigate_lab_step as _navigate
+	return _navigate(lab_instance=lab_instance, direction=direction, step=step)
+
+
+@frappe.whitelist()
+def evaluate_lab(lab: str, lesson: str, course: str):
+	from lms.lms.lab import evaluate_lab as _evaluate
+	return _evaluate(lab=lab, lesson=lesson, course=course)
+
+
+@frappe.whitelist()
+def enqueue_evaluate_lab(lab: str, lesson: str, course: str):
+	from lms.lms.lab import enqueue_evaluate_lab as _enqueue
+	return _enqueue(lab=lab, lesson=lesson, course=course)
+
+
+@frappe.whitelist()
+def cleanup_lab_instance(lab_instance: str):
+	from lms.lms.lab import cleanup_lab_instance as _cleanup
+	return _cleanup(lab_instance=lab_instance)
+
+
+@frappe.whitelist()
+def get_lab_cleanup_status(lab: str, include_active: bool = False):
+	from lms.lms.lab import get_lab_cleanup_status as _status
+	return _status(lab=lab, include_active=include_active)
+
+
+@frappe.whitelist()
+def get_course_lab_submissions(course: str) -> dict:
+	"""Returns the best (highest percentage) submission per lab for the current user."""
+	member = frappe.session.user
+	if member == "Guest":
+		return {}
+	submissions = frappe.db.sql(
+		"""
+		SELECT lab, status, percentage, score, max_score, passing_percentage
+		FROM `tabLMS Lab Submission`
+		WHERE member = %s AND course = %s
+		ORDER BY percentage DESC
+		""",
+		(member, course),
+		as_dict=True,
+	)
+	result = {}
+	for s in submissions:
+		if s.lab not in result:
+			result[s.lab] = {
+				"status": s.status,
+				"percentage": float(s.percentage),
+				"score": float(s.score),
+				"max_score": float(s.max_score),
+				"passing_percentage": float(s.passing_percentage),
+			}
+	return result
+
+
+@frappe.whitelist()
+def get_last_lab_submission(lab: str, lesson: str):
+	"""Returns the most recent LMS Lab Submission for the current user and lesson."""
+	member = frappe.session.user
+	submissions = frappe.get_all(
+		"LMS Lab Submission",
+		filters={"lab": lab, "lesson": lesson, "member": member},
+		fields=["name", "score", "max_score", "percentage", "status", "submission_time", "passing_percentage"],
+		order_by="submission_time desc",
+		limit=1,
+	)
+	if not submissions:
+		return None
+	sub = submissions[0]
+	results = frappe.get_all(
+		"LMS Lab Result",
+		filters={"parent": sub.name},
+		fields=["criterion_name", "doctype_checked", "points_earned", "max_points", "passed", "details"],
+		order_by="idx asc",
+	)
+	sub["results"] = results
+	return sub

@@ -73,36 +73,42 @@ class CourseLesson(Document):
 				)
 
 
-def apply_enforcement_flags(quiz_done: bool, assignment_done: bool, settings: dict) -> tuple[bool, bool]:
-	"""Return (quiz_completed, assignment_completed) accounting for enforcement toggles.
+def apply_enforcement_flags(
+	quiz_done: bool, assignment_done: bool, lab_done: bool, settings: dict
+) -> tuple[bool, bool, bool]:
+	"""Return (quiz_completed, assignment_completed, lab_completed) accounting for enforcement toggles.
 
 	If an enforcement flag is missing from `settings`, treat it as enabled (1) so the
 	legacy always-on gating remains the safe default.
 	"""
 	enforce_quiz = settings.get("enforce_quiz_completion", 1)
 	enforce_assignment = settings.get("enforce_assignment_completion", 1)
+	enforce_lab = settings.get("enforce_lab_completion", 1)
 	return (
 		True if not enforce_quiz else quiz_done,
 		True if not enforce_assignment else assignment_done,
+		True if not enforce_lab else lab_done,
 	)
 
 
 @frappe.whitelist()
-def save_progress(lesson: str, course: str, scorm_details: dict = None):
+def save_progress(lesson: str, course: str, scorm_details: dict = None, member: str = None):
 	"""
-	Note: Pass the argument scorm_details as a dict if it is SCORM related save_progress
+	Note: Pass the argument scorm_details as a dict if it is SCORM related save_progress.
+	Pass member explicitly when calling from a background job (frappe.session.user = Administrator).
 	"""
-	membership = frappe.db.exists("LMS Enrollment", {"course": course, "member": frappe.session.user})
+	member = member or frappe.session.user
+	membership = frappe.db.exists("LMS Enrollment", {"course": course, "member": member})
 	if not membership:
 		return 0
 
 	frappe.db.set_value("LMS Enrollment", membership, "current_lesson", lesson, update_modified=False)
 	progress_already_exists = frappe.db.exists(
-		"LMS Course Progress", {"lesson": lesson, "member": frappe.session.user}
+		"LMS Course Progress", {"lesson": lesson, "member": member}
 	)
 	lesson_already_completed = frappe.db.exists(
 		"LMS Course Progress",
-		{"lesson": lesson, "member": frappe.session.user, "status": "Complete"},
+		{"lesson": lesson, "member": member, "status": "Complete"},
 	)
 
 	try:
@@ -119,23 +125,24 @@ def save_progress(lesson: str, course: str, scorm_details: dict = None):
 		# Pre-migrate sites won't have these columns yet. Fall back to {} so
 		# apply_enforcement_flags treats both as enforced (legacy behavior).
 		settings = {}
-	quiz_completed, assignment_completed = apply_enforcement_flags(
-		quiz_done=get_quiz_progress(lesson),
-		assignment_done=get_assignment_progress(lesson),
+	quiz_completed, assignment_completed, lab_completed = apply_enforcement_flags(
+		quiz_done=get_quiz_progress(lesson, member=member),
+		assignment_done=get_assignment_progress(lesson, member=member),
+		lab_done=get_lab_progress(lesson, member=member),
 		settings=settings,
 	)
 
 	if scorm_details:
 		scorm_details = frappe._dict(**scorm_details)
 
-	if not progress_already_exists and quiz_completed and assignment_completed and not scorm_details:
+	if not progress_already_exists and quiz_completed and assignment_completed and lab_completed and not scorm_details:
 		try:
 			frappe.get_doc(
 				{
 					"doctype": "LMS Course Progress",
 					"lesson": lesson,
 					"status": "Complete",
-					"member": frappe.session.user,
+					"member": member,
 				}
 			).save(ignore_permissions=True)
 		except frappe.UniqueValidationError:
@@ -149,7 +156,7 @@ def save_progress(lesson: str, course: str, scorm_details: dict = None):
 					"doctype": "LMS Course Progress",
 					"lesson": lesson,
 					"status": "Complete" if scorm_details.is_complete else "Partially Complete",
-					"member": frappe.session.user,
+					"member": member,
 					"scorm_content": "" if scorm_details.is_complete else scorm_details.scorm_content,
 				}
 			).save(ignore_permissions=True)
@@ -163,11 +170,11 @@ def save_progress(lesson: str, course: str, scorm_details: dict = None):
 			{
 				"lesson": lesson,
 				"status": "Complete" if scorm_details.is_complete else "Partially Complete",
-				"member": frappe.session.user,
+				"member": member,
 				"scorm_content": "" if scorm_details.is_complete else scorm_details.scorm_content,
 			},
 		)
-	if (not progress_already_exists and quiz_completed and assignment_completed and not scorm_details) or (
+	if (not progress_already_exists and quiz_completed and assignment_completed and lab_completed and not scorm_details) or (
 		scorm_details and scorm_details.is_complete and not lesson_already_completed
 	):
 		next_lesson = get_next_lesson(course, lesson)
@@ -179,7 +186,7 @@ def save_progress(lesson: str, course: str, scorm_details: dict = None):
 				next_lesson,
 				update_modified=False,
 			)
-	progress = get_course_progress(course)
+	progress = get_course_progress(course, member=member)
 	if not is_demo_course(course):
 		capture("course_progress", "lms")
 
@@ -230,7 +237,8 @@ def get_next_lesson(course: str, lesson: str):
 	return frappe.db.get_value("Lesson Reference", {"parent": next_chapter, "idx": 1}, "lesson")
 
 
-def get_quiz_progress(lesson):
+def get_quiz_progress(lesson, member: str = None):
+	member = member or frappe.session.user
 	lesson_details = frappe.db.get_value("Course Lesson", lesson, ["body", "content"], as_dict=1)
 	quizzes = []
 
@@ -256,7 +264,7 @@ def get_quiz_progress(lesson):
 			"LMS Quiz Submission",
 			{
 				"quiz": quiz,
-				"member": frappe.session.user,
+				"member": member,
 				"percentage": [">=", passing_percentage],
 			},
 		):
@@ -264,7 +272,8 @@ def get_quiz_progress(lesson):
 	return True
 
 
-def get_assignment_progress(lesson):
+def get_assignment_progress(lesson, member: str = None):
+	member = member or frappe.session.user
 	lesson_details = frappe.db.get_value("Course Lesson", lesson, ["body", "content"], as_dict=1)
 	assignments = []
 
@@ -282,7 +291,26 @@ def get_assignment_progress(lesson):
 	for assignment in assignments:
 		if not frappe.db.exists(
 			"LMS Assignment Submission",
-			{"assignment": assignment, "member": frappe.session.user},
+			{"assignment": assignment, "member": member},
 		):
 			return False
 	return True
+
+
+def get_lab_progress(lesson, member: str = None):
+	"""Returns True if the lesson's lab has been passed by the current user, or if no lab is attached."""
+	member = member or frappe.session.user
+	lab_id = frappe.db.get_value("Course Lesson", lesson, "lab_id")
+	if not lab_id:
+		return True
+
+	passing_percentage = frappe.db.get_value("LMS Lab", lab_id, "passing_percentage") or 70
+	return frappe.db.exists(
+		"LMS Lab Submission",
+		{
+			"lab": lab_id,
+			"lesson": lesson,
+			"member": member,
+			"status": "Pass",
+		},
+	) is not None

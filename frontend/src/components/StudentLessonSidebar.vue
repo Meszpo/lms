@@ -61,7 +61,7 @@
 										},
 								  }
 						"
-						class="flex items-center gap-3 rounded ps-9 pe-3 py-2 text-sm text-ink-gray-8 hover:bg-surface-gray-2"
+						class="flex items-center gap-2 rounded ps-9 pe-3 py-2 text-sm text-ink-gray-8 hover:bg-surface-gray-2"
 						:class="[
 							inlineSelect ? 'cursor-pointer' : '',
 							isActive(lesson.number)
@@ -77,12 +77,39 @@
 						"
 					>
 						<component
-							:is="iconFor(lesson.icon)"
-							class="size-4 stroke-1.5 shrink-0 text-ink-gray-7"
+							:is="iconFor(lesson)"
+							class="size-4 stroke-1.5 shrink-0"
+							:class="lesson.lab_id ? 'text-blue-500' : 'text-ink-gray-7'"
 						/>
 						<span class="truncate flex-1">{{ lesson.title }}</span>
+
+						<!-- Lab status badge -->
+						<template v-if="lesson.lab_id">
+							<span
+								v-if="labSubmissions[lesson.lab_id]"
+								class="flex items-center gap-1 shrink-0 text-xs font-medium px-1.5 py-0.5 rounded-full"
+								:class="labSubmissions[lesson.lab_id].status === 'Pass'
+									? 'bg-green-100 text-green-700'
+									: 'bg-red-100 text-red-600'"
+							>
+								<CheckCircle2
+									v-if="labSubmissions[lesson.lab_id].status === 'Pass'"
+									class="size-3"
+								/>
+								<XCircle v-else class="size-3" />
+								{{ labSubmissions[lesson.lab_id].percentage.toFixed(0) }}%
+							</span>
+							<span
+								v-else
+								class="flex items-center gap-1 shrink-0 text-xs font-medium px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-500"
+							>
+								<FlaskConical class="size-3" />
+								{{ __('Lab') }}
+							</span>
+						</template>
+
 						<CircleCheck
-							v-if="lesson.is_complete"
+							v-else-if="lesson.is_complete"
 							class="size-4 stroke-1.5 shrink-0 text-green-700 fill-none"
 						/>
 						<Circle v-else class="size-4 stroke-1.5 shrink-0 text-ink-gray-4" />
@@ -94,15 +121,18 @@
 </template>
 
 <script setup>
-import { computed, watch, watchEffect } from 'vue'
-import { createResource } from 'frappe-ui'
+import { computed, watch, watchEffect, ref, onMounted, onBeforeUnmount } from 'vue'
+import { createResource, call } from 'frappe-ui'
 import { Disclosure, DisclosureButton, DisclosurePanel } from '@headlessui/vue'
 import {
 	ChevronDown,
 	Circle,
 	CircleCheck,
+	CheckCircle2,
+	XCircle,
 	Cloud,
 	FileText,
+	FlaskConical,
 	HelpCircle,
 	LockKeyhole,
 	MonitorPlay,
@@ -122,6 +152,8 @@ const props = defineProps({
 
 const emit = defineEmits(['select-lesson'])
 
+const labSubmissions = ref({})
+
 const outline = createResource({
 	url: 'lms.lms.utils.get_course_outline',
 	cache: [
@@ -138,14 +170,60 @@ const outline = createResource({
 	auto: true,
 })
 
+async function loadLabSubmissions() {
+	if (!props.withProgress) return
+	try {
+		const data = await call('lms.lms.api.get_course_lab_submissions', {
+			course: props.courseName,
+		})
+		labSubmissions.value = data || {}
+	} catch {
+		labSubmissions.value = {}
+	}
+}
+
+// BroadcastChannel — odświeżenie submissions po zakończeniu cleanup w tle
+let labChannel = null
+let labResultPoller = null
+
+function startLabResultPolling(labId) {
+	if (labResultPoller) return
+	const before = labSubmissions.value[labId]?.percentage
+	labResultPoller = setInterval(async () => {
+		await loadLabSubmissions()
+		const after = labSubmissions.value[labId]?.percentage
+		if (after !== undefined && after !== before) {
+			clearInterval(labResultPoller)
+			labResultPoller = null
+		}
+	}, 2000)
+}
+
+onMounted(() => {
+	loadLabSubmissions()
+	if (typeof BroadcastChannel !== 'undefined') {
+		labChannel = new BroadcastChannel('lms_lab_results')
+		labChannel.onmessage = (e) => {
+			if (e.data?.type === 'lab_ended' && e.data.lab) {
+				startLabResultPolling(e.data.lab)
+			}
+		}
+	}
+})
+
+onBeforeUnmount(() => {
+	if (labChannel) labChannel.close()
+	if (labResultPoller) { clearInterval(labResultPoller); labResultPoller = null }
+})
+
 watch(
 	() => props.courseName,
-	() => outline.reload()
+	() => {
+		outline.reload()
+		loadLabSubmissions()
+	}
 )
 
-// Re-runs whenever either source updates so a completion event that
-// lands before outline.data finishes loading still gets applied (and a
-// late-arriving outline reload doesn't wipe an already-marked lesson).
 watchEffect(() => {
 	const lessonName = props.completedLesson
 	if (!lessonName || !outline.data) return
@@ -160,8 +238,9 @@ watchEffect(() => {
 
 const displayedProgress = computed(() => Math.ceil(props.progress || 0))
 
-function iconFor(icon) {
-	switch (icon) {
+function iconFor(lesson) {
+	if (lesson.lab_id) return FlaskConical
+	switch (lesson.icon) {
 		case 'icon-youtube':
 			return MonitorPlay
 		case 'icon-quiz':

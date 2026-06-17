@@ -25,7 +25,7 @@ const noSidebar = ref(false)
 const { settings } = useSettings()
 
 router.beforeEach((to, from, next) => {
-	if (to.query.fromLesson || to.path === '/persona') {
+	if (to.query.fromLesson || to.path === '/persona' || to.name === 'LabWindow') {
 		noSidebar.value = true
 	} else {
 		noSidebar.value = false

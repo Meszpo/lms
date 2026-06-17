@@ -73,6 +73,7 @@ import Transactions from '@/components/Settings/Transactions/Transactions.vue'
 import ZoomSettings from '@/components/Settings/ZoomSettings.vue'
 import GoogleMeetSettings from '@/components/Settings/GoogleMeetSettings.vue'
 import Badges from '@/components/Settings/Badges.vue'
+import LabSettings from '@/components/Settings/LabSettings.vue'
 
 const show = defineModel()
 const doctype = ref('LMS Settings')
@@ -326,6 +327,13 @@ const tabsStructure = computed(() => {
 											description:
 												'When enabled, lessons with a quiz cannot be marked complete until the quiz is submitted.',
 										},
+										{
+											label: 'Enforce lab completion',
+											name: 'enforce_lab_completion',
+											type: 'checkbox',
+											description:
+												'When enabled, lessons with an interactive lab cannot be marked complete until the lab is passed.',
+										},
 									],
 								},
 							],
@@ -490,6 +498,19 @@ const tabsStructure = computed(() => {
 						'Manage Google Meet accounts to conduct live classes from batches',
 					icon: 'Presentation',
 					template: markRaw(GoogleMeetSettings),
+				},
+			],
+		},
+		{
+			label: 'Labs',
+			hideLabel: false,
+			items: [
+				{
+					label: 'Lab Connections',
+					description:
+						'Configure external Frappe/ERPNext systems where interactive lab environments are provisioned',
+					icon: 'FlaskConical',
+					template: markRaw(LabSettings),
 				},
 			],
 		},

@@ -39,20 +39,100 @@
 				></div>
 			</div>
 		</div>
+
+		<!-- Lab Configuration -->
+		<div class="border-t mt-4">
+			<div class="w-5/6 mx-auto pt-4 pb-6">
+				<div
+					class="flex items-center justify-between cursor-pointer mb-3"
+					@click="openLabSection = !openLabSection"
+				>
+					<div class="flex items-center gap-2">
+						<FlaskConical class="size-4 text-ink-gray-5 stroke-1.5" />
+						<label class="block font-medium text-ink-gray-5 cursor-pointer">
+							{{ __('Interactive Lab') }}
+						</label>
+						<span
+							v-if="lesson.lab_id"
+							class="text-xs bg-surface-blue-1 text-ink-blue-3 px-2 py-0.5 rounded-full"
+						>
+							{{ lesson.lab_id }}
+						</span>
+					</div>
+					<ChevronRight
+						class="stroke-2 h-4 w-4 text-ink-gray-5 transform duration-200"
+						:class="{ 'rotate-90': openLabSection }"
+					/>
+				</div>
+				<div v-show="openLabSection" class="space-y-3">
+					<p class="text-sm text-ink-gray-5">
+						{{ __('Link an interactive lab to this lesson. Students will be able to provision a test environment and perform hands-on tasks that are evaluated automatically.') }}
+					</p>
+					<div class="flex items-end gap-3">
+						<div class="flex-1">
+							<Link
+								v-model="lesson.lab_id"
+								:label="__('Lab')"
+								doctype="LMS Lab"
+								@update:modelValue="markDirty"
+							/>
+						</div>
+						<router-link
+							v-if="lesson.lab_id"
+							:to="{ name: 'LabForm', params: { labID: lesson.lab_id } }"
+							target="_blank"
+						>
+							<Button variant="subtle" size="sm">
+								{{ __('Edit Lab') }}
+							</Button>
+						</router-link>
+						<Button
+							v-if="lesson.lab_id"
+							variant="ghost"
+							theme="red"
+							size="sm"
+							@click="lesson.lab_id = ''; markDirty()"
+						>
+							{{ __('Remove') }}
+						</Button>
+					</div>
+					<div v-if="!lesson.lab_id" class="text-center py-2">
+						<router-link :to="{ name: 'Labs', query: { new: 'true' } }" target="_blank">
+							<Button variant="subtle" size="sm">
+								<template #prefix><Plus class="w-3.5 h-3.5" /></template>
+								{{ __('Create new Lab') }}
+							</Button>
+						</router-link>
+					</div>
+					<div
+						v-if="lesson.lab_id && labDetails.data"
+						class="p-3 bg-surface-gray-1 rounded-lg border text-sm space-y-1"
+					>
+						<div class="flex gap-4 text-ink-gray-6">
+							<span>{{ __('Steps') }}: <strong>{{ labDetails.data.total_steps }}</strong></span>
+							<span>{{ __('Passing') }}: <strong>{{ labDetails.data.passing_percentage }}%</strong></span>
+							<span>{{ __('Session') }}: <strong>{{ labDetails.data.max_session_minutes }} min</strong></span>
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
 	</div>
 </template>
 <script setup>
-import { createResource, toast } from 'frappe-ui'
-import { reactive, onMounted, inject, ref, onBeforeUnmount } from 'vue'
+import { createResource, toast, Button } from 'frappe-ui'
+import { reactive, onMounted, inject, ref, onBeforeUnmount, watch } from 'vue'
 import EditorJS from '@editorjs/editorjs'
-import { ChevronRight } from 'lucide-vue-next'
+import { ChevronRight, FlaskConical, Plus } from 'lucide-vue-next'
 import { getEditorTools, enablePlyr, sanitizeEditorJs } from '@/utils'
 import { useOnboarding, useTelemetry } from 'frappe-ui/frappe'
+import Link from '@/components/Controls/Link.vue'
 
 const editor = ref(null)
 const instructorEditor = ref(null)
 const user = inject('$user')
 const openInstructorEditor = ref(false)
+const openLabSection = ref(false)
 const { capture } = useTelemetry()
 const { updateOnboardingStep } = useOnboarding('learning')
 let autoSaveInterval
@@ -115,6 +195,7 @@ const lesson = reactive({
 	body: '',
 	instructor_notes: '',
 	content: '',
+	lab_id: '',
 })
 
 const lessonDetails = createResource({
@@ -133,6 +214,7 @@ const lessonDetails = createResource({
 			lesson.include_in_preview = data?.lesson?.include_in_preview
 				? true
 				: false
+			lesson.lab_id = data.lesson.lab_id || ''
 			addLessonContent(data)
 			addInstructorNotes(data)
 			enableAutoSave()
@@ -162,7 +244,7 @@ const addInstructorNotes = (data) => {
 				sanitizeEditorJs(JSON.parse(data.lesson.instructor_content))
 			)
 		} else if (data.lesson.instructor_notes) {
-			let blocks = convertToJSON(data.lesson)
+			let blocks = convertToJSON({ body: data.lesson.instructor_notes })
 			instructorEditor.value.render({
 				blocks: blocks,
 			})
@@ -232,6 +314,34 @@ const lessonReference = createResource({
 		}
 	},
 })
+
+const labDetails = createResource({
+	url: 'frappe.client.get',
+	makeParams: () => ({
+		doctype: 'LMS Lab',
+		name: lesson.lab_id,
+		fieldname: ['title', 'passing_percentage', 'max_session_minutes', 'steps'],
+	}),
+	transform(data) {
+		return {
+			title: data.title,
+			passing_percentage: data.passing_percentage,
+			max_session_minutes: data.max_session_minutes,
+			total_steps: (data.steps || []).length,
+		}
+	},
+	onError() {
+		// Lab may have been deleted — silently clear the reference
+		lesson.lab_id = ''
+	},
+})
+
+watch(
+	() => lesson.lab_id,
+	(newVal) => {
+		if (newVal) labDetails.reload()
+	},
+)
 
 const convertToJSON = (lessonData) => {
 	let blocks = []
@@ -363,7 +473,7 @@ const saveLesson = (e) => {
 
 const removeEmptyBlocks = (outputData) => {
 	let blocks = outputData.blocks.filter((block) => {
-		return Object.keys(block.data).length > 0 || block.type == 'paragraph'
+		return Object.keys(block.data).length > 0 || block.type == 'paragraph' || block.type == 'markdown'
 	})
 	outputData.blocks = blocks
 	return outputData
@@ -438,6 +548,26 @@ const validateLesson = () => {
 
 .ce-block__content {
 	max-width: none;
+}
+
+.codex-editor [contenteditable] {
+	font-weight: normal;
+}
+
+.codex-editor b {
+	font-weight: bold;
+}
+
+.codex-editor i {
+	font-style: italic;
+}
+
+.codex-editor u {
+	text-decoration: underline;
+}
+
+.codex-editor s {
+	text-decoration: line-through;
 }
 
 .ce-toolbar__actions,

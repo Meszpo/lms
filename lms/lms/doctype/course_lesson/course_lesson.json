@@ -24,6 +24,7 @@
   "youtube",
   "column_break_9",
   "quiz_id",
+  "lab_id",
   "section_break_16",
   "question",
   "column_break_15",
@@ -88,6 +89,13 @@
    "fieldname": "quiz_id",
    "fieldtype": "Data",
    "label": "Quiz ID"
+  },
+  {
+   "description": "Interactive Lab linked to this lesson. Students will see a 'Start Lab' button.",
+   "fieldname": "lab_id",
+   "fieldtype": "Link",
+   "label": "Lab ID",
+   "options": "LMS Lab"
   },
   {
    "fieldname": "column_break_9",

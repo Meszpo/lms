@@ -40,6 +40,23 @@ const routes = [
 		props: true,
 	},
 	{
+		path: '/labs/:labId/:lessonId',
+		name: 'LabWindow',
+		component: () => import('@/pages/LabWindow.vue'),
+		props: true,
+	},
+	{
+		path: '/labs',
+		name: 'Labs',
+		component: () => import('@/pages/Labs.vue'),
+	},
+	{
+		path: '/lab-editor/:labID',
+		name: 'LabForm',
+		component: () => import('@/pages/LabForm.vue'),
+		props: true,
+	},
+	{
 		path: '/batches',
 		name: 'Batches',
 		component: () => import('@/pages/Batches/Batches.vue'),

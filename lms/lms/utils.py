@@ -1059,6 +1059,7 @@ def get_outline_lessons(chapter_names: list) -> list:
 			CourseLesson.file_type.as_("file_type"),
 			CourseLesson.course.as_("course"),
 			CourseLesson.chapter.as_("chapter"),
+			CourseLesson.lab_id.as_("lab_id"),
 		)
 		.where(LessonReference.parent.isin(chapter_names))
 		.orderby(LessonReference.idx)
@@ -1111,6 +1112,7 @@ def build_outline(
 			file_type=lr.file_type,
 			course=lr.course,
 			chapter=lr.chapter,
+			lab_id=lr.lab_id or None,
 			number=f"{chapter_idx_by_name[lr.chapter_name]}-{lr.lesson_idx}",
 		)
 		if progress:
@@ -1180,6 +1182,7 @@ def get_lesson(course: str, chapter: int, lesson: int) -> dict:
 			"course",
 			"content",
 			"instructor_content",
+			"lab_id",
 		],
 		as_dict=1,
 	)
@@ -2034,6 +2037,7 @@ def get_lesson_creation_details(course: str, chapter: int, lesson: int) -> dict:
 				"instructor_content",
 				"youtube",
 				"quiz_id",
+				"lab_id",
 			],
 			as_dict=1,
 		)

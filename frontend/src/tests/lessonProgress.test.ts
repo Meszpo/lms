@@ -27,10 +27,14 @@ describe('resolveDwellSeconds', () => {
 		expect(resolveDwellSeconds(undefined, 60)).toBe(60)
 	})
 
-	it('returns null when value is 0 or negative (dwell disabled)', () => {
-		expect(resolveDwellSeconds(0)).toBeNull()
+	it('returns 0 for value 0 (mark immediately on page load)', () => {
+		expect(resolveDwellSeconds(0)).toBe(0)
+		expect(resolveDwellSeconds('0')).toBe(0)
+	})
+
+	it('returns null for negative values (auto-complete disabled)', () => {
 		expect(resolveDwellSeconds(-5)).toBeNull()
-		expect(resolveDwellSeconds('0')).toBeNull()
+		expect(resolveDwellSeconds(-1)).toBeNull()
 	})
 
 	it('returns null when value is non-numeric', () => {

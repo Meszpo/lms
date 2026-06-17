@@ -236,6 +236,44 @@
 								:quizId="lesson.data.quiz_id"
 							/>
 						</div>
+
+						<!-- Interactive Lab section -->
+						<div v-if="lesson.data?.lab_id" class="mt-8 mx-5">
+							<div class="border rounded-lg p-5 bg-surface-blue-1 border-outline-blue-2">
+								<div class="flex items-center gap-2 mb-2">
+									<FlaskConical class="size-5 text-ink-blue-3 stroke-1.5" />
+									<h3 class="font-semibold text-ink-gray-8">{{ __('Interactive Lab') }}</h3>
+								</div>
+								<div
+									v-if="labInfo?.description"
+									class="text-sm text-ink-gray-6 mb-4 lab-desc-preview"
+									v-html="renderLabDesc(labInfo.description)"
+								></div>
+								<p v-else class="text-sm text-ink-gray-6 mb-4">
+									{{ __('This lesson includes an interactive lab. You will work in a live Frappe/ERPNext environment and your work will be automatically evaluated.') }}
+								</p>
+								<LabSubmissionResult
+									v-if="lastLabSubmission"
+									:submission="lastLabSubmission"
+								/>
+								<div v-if="labCleaning" class="flex items-center gap-2 text-sm text-ink-gray-6 mt-1">
+									<svg class="size-4 animate-spin shrink-0 text-ink-blue-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+										<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+										<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+									</svg>
+									{{ __('Cleaning up previous lab session…') }}
+								</div>
+								<Button
+									variant="solid"
+									:disabled="labCleaning"
+									@click="openLabWindow"
+									class="mt-2"
+								>
+									<template #prefix><FlaskConical class="size-4" /></template>
+									{{ lastLabSubmission ? __('Retry Lab') : __('Start Lab') }}
+								</Button>
+							</div>
+						</div>
 					</div>
 					<div
 						v-if="lesson.data && (allowDiscussions || tabs.length > 1)"
@@ -292,6 +330,53 @@
 		:lessonName="lesson.data?.name"
 		:lessonTitle="lesson.data?.title"
 	/>
+
+	<!-- Popup permission dialog -->
+	<Teleport to="body">
+		<Transition name="lms-dialog-fade">
+			<div
+				v-if="showPopupDialog"
+				class="fixed inset-0 z-50 flex items-center justify-center p-4"
+				style="background: rgba(0,0,0,0.45)"
+				@click.self="showPopupDialog = false"
+			>
+				<div class="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
+					<div class="flex items-start gap-4 mb-5">
+						<div class="shrink-0 flex items-center justify-center w-10 h-10 rounded-full bg-blue-50">
+							<AppWindow class="size-5 text-blue-600" />
+						</div>
+						<div>
+							<h3 class="font-semibold text-gray-900 text-base mb-1">
+								{{ __('Allow opening new windows') }}
+							</h3>
+							<p class="text-sm text-gray-600 leading-relaxed">
+								{{ __('This lab requires opening 2 browser windows: one for the lab system and one for the instructions panel. Please allow pop-ups for this site if your browser asks.') }}
+							</p>
+						</div>
+					</div>
+					<div
+						v-if="popupBlocked"
+						class="mb-4 flex items-start gap-2 rounded-lg bg-red-50 border border-red-200 px-3 py-2.5"
+					>
+						<AlertCircle class="size-4 text-red-500 shrink-0 mt-0.5" />
+						<p class="text-sm text-red-700">
+							{{ __('Pop-ups are blocked by your browser. Please allow pop-ups for this site in your browser settings and try again.') }}
+						</p>
+					</div>
+					<div class="flex justify-end gap-2">
+						<button
+							class="px-4 py-2 text-sm font-medium text-gray-600 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors"
+							@click="showPopupDialog = false"
+						>{{ __('Cancel') }}</button>
+						<button
+							class="px-4 py-2 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
+							@click="confirmAndOpenLab"
+						>{{ __('Allow & Start Lab') }}</button>
+					</div>
+				</div>
+			</div>
+		</Transition>
+	</Teleport>
 </template>
 <script setup>
 import {
@@ -325,6 +410,9 @@ import {
 	Info,
 	MessageCircleQuestion,
 	TrendingUp,
+	FlaskConical,
+	AppWindow,
+	AlertCircle,
 } from 'lucide-vue-next'
 import {
 	getEditorTools,
@@ -353,6 +441,7 @@ import StudentLessonSidebar from '@/components/StudentLessonSidebar.vue'
 import UserAvatar from '@/components/UserAvatar.vue'
 import Notes from '@/components/Notes/Notes.vue'
 import InlineLessonMenu from '@/components/Notes/InlineLessonMenu.vue'
+import LabSubmissionResult from '@/components/LabSubmissionResult.vue'
 import { getLmsRoute } from '@/utils/basePath'
 
 const user = inject('$user')
@@ -366,6 +455,8 @@ const lessonProgress = ref(0)
 const lessonContainer = ref(null)
 const zenModeEnabled = ref(false)
 const showStatsDialog = ref(false)
+const showPopupDialog = ref(false)
+const popupBlocked = ref(false)
 const hasQuiz = ref(false)
 const discussionsContainer = ref(null)
 const timer = ref(0)
@@ -426,6 +517,25 @@ onMounted(() => {
 			emit('progress-updated', data.progress)
 		}
 	})
+	if (typeof BroadcastChannel !== 'undefined') {
+		labBroadcastChannel = new BroadcastChannel('lms_lab_results')
+		labBroadcastChannel.onmessage = (e) => {
+			if (
+				e.data?.type === 'lab_evaluated' &&
+				e.data.lab === lesson.data?.lab_id
+			) {
+				loadLastLabSubmission()
+			} else if (
+				e.data?.type === 'lab_ended' &&
+				e.data.lab === lesson.data?.lab_id
+			) {
+				labEndedAt = new Date()
+				labEndedLastSubmissionName = lastLabSubmission.value?.name || null
+				labCleaning.value = true
+				startCleanupPolling()
+			}
+		}
+	}
 })
 
 const attachFullscreenEvent = () => {
@@ -444,6 +554,8 @@ onBeforeUnmount(() => {
 	document.removeEventListener('fullscreenchange', attachFullscreenEvent)
 	if (!props.embedded) sidebarStore.isSidebarCollapsed = false
 	trackVideoWatchDuration()
+	if (labBroadcastChannel) labBroadcastChannel.close()
+	if (labCleanupPoller) { clearInterval(labCleanupPoller); labCleanupPoller = null }
 })
 
 const lesson = createResource({
@@ -489,6 +601,9 @@ const setupLesson = (data) => {
 		checkIfDiscussionsAllowed()
 	})
 	checkQuiz()
+	loadLastLabSubmission()
+	loadLabInfo()
+	checkLabCleanupStatus()
 }
 
 const checkQuiz = () => {
@@ -884,6 +999,10 @@ const startTimer = () => {
 		settingsStore.settings?.data?.lesson_dwell_time
 	)
 	if (dwell === null) return
+	if (dwell === 0) {
+		markProgress()
+		return
+	}
 	timerInterval = setInterval(() => {
 		timer.value++
 		if (timer.value >= dwell) {
@@ -973,6 +1092,175 @@ const toggleInlineMenu = async () => {
 
 const showVideoStats = () => {
 	showStatsDialog.value = true
+}
+
+// Interactive Lab
+const lastLabSubmission = ref(null)
+const labInfo = ref(null)
+const labCleaning = ref(false)
+let labCleanupPoller = null
+let labBroadcastChannel = null
+let labEndedAt = null // timestamp when lab_ended broadcast was received
+let labEndedLastSubmissionName = null // name of last submission at time of lab_ended
+
+const pollCleanupOnce = async () => {
+	const labId = lesson.data?.lab_id
+	if (!labId) return
+	try {
+		const res = await call('lms.lms.api.get_lab_cleanup_status', {
+			lab: labId,
+			include_active: true,
+		})
+		if (!res?.cleaning) {
+			labCleaning.value = false
+			if (labCleanupPoller) { clearInterval(labCleanupPoller); labCleanupPoller = null }
+			await loadLastLabSubmission()
+			// Only treat as a new result if a different (newer) submission appeared
+			const sub = lastLabSubmission.value
+			const isNewResult = sub && (sub.name !== labEndedLastSubmissionName)
+			if (isNewResult && sub.status === 'Pass') {
+				const name = lesson.data?.name
+				if (name) {
+					completedLesson.value = name
+					emit('lesson-completed', name)
+				}
+				// Update progress bar — save_progress ran server-side and published
+				// a realtime event, but fetch it explicitly as a fallback in case
+				// the socket event was missed.
+				try {
+					const updated = await call(
+						'lms.lms.doctype.course_lesson.course_lesson.save_progress',
+						{ lesson: lesson.data.name, course: props.courseName }
+					)
+					if (updated) {
+						lessonProgress.value = updated
+						emit('progress-updated', updated)
+					}
+				} catch {}
+			}
+			return true
+		}
+	} catch {}
+	return false
+}
+
+const startCleanupPolling = async () => {
+	if (labCleanupPoller) return
+	// Check immediately — job may already be done
+	const done = await pollCleanupOnce()
+	if (done) return
+	labCleanupPoller = setInterval(async () => {
+		await pollCleanupOnce()
+	}, 2000)
+}
+
+const checkLabCleanupStatus = async () => {
+	if (!lesson.data?.lab_id) return
+	try {
+		const res = await call('lms.lms.api.get_lab_cleanup_status', { lab: lesson.data.lab_id })
+		labCleaning.value = res?.cleaning || false
+		if (labCleaning.value) startCleanupPolling()
+	} catch {
+		labCleaning.value = false
+	}
+}
+
+const loadLabInfo = async () => {
+	if (!lesson.data?.lab_id) return
+	try {
+		labInfo.value = await call('lms.lms.api.get_lab_info', { lab: lesson.data.lab_id })
+	} catch {
+		labInfo.value = null
+	}
+}
+
+function renderLabDesc(text) {
+	if (!text) return ''
+	const lines = text.split('\n')
+	const out = []
+	let inUl = false, inOl = false
+	function closeList() {
+		if (inUl) { out.push('</ul>'); inUl = false }
+		if (inOl) { out.push('</ol>'); inOl = false }
+	}
+	function inline(s) {
+		return s
+			.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+			.replace(/\*([^*\n]+)\*/g, '<em>$1</em>')
+			.replace(/`([^`\n]+)`/g, '<code>$1</code>')
+			.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+	}
+	for (const line of lines) {
+		const h1 = line.match(/^# (.+)$/), h2 = line.match(/^## (.+)$/), h3 = line.match(/^### (.+)$/)
+		const ul = line.match(/^[*-] (.+)$/), ol = line.match(/^\d+\. (.+)$/)
+		if (h1) { closeList(); out.push(`<h1>${inline(h1[1])}</h1>`) }
+		else if (h2) { closeList(); out.push(`<h2>${inline(h2[1])}</h2>`) }
+		else if (h3) { closeList(); out.push(`<h3>${inline(h3[1])}</h3>`) }
+		else if (line.match(/^---+$/)) { closeList(); out.push('<hr>') }
+		else if (ul) {
+			if (inOl) { out.push('</ol>'); inOl = false }
+			if (!inUl) { out.push('<ul>'); inUl = true }
+			out.push(`<li>${inline(ul[1])}</li>`)
+		} else if (ol) {
+			if (inUl) { out.push('</ul>'); inUl = false }
+			if (!inOl) { out.push('<ol>'); inOl = true }
+			out.push(`<li>${inline(ol[1])}</li>`)
+		} else if (line.trim() === '') { closeList() }
+		else { closeList(); out.push(`<p>${inline(line)}</p>`) }
+	}
+	closeList()
+	return out.join('\n')
+}
+
+const loadLastLabSubmission = async () => {
+	if (!lesson.data?.lab_id) return
+	try {
+		const data = await call('lms.lms.api.get_last_lab_submission', {
+			lab: lesson.data.lab_id,
+			lesson: lesson.data.name,
+		})
+		lastLabSubmission.value = data
+	} catch {
+		lastLabSubmission.value = null
+	}
+}
+
+const openLabWindow = () => {
+	popupBlocked.value = false
+	showPopupDialog.value = true
+}
+
+const confirmAndOpenLab = () => {
+	const courseName = route.params.courseName || ''
+	const panelUrl = getLmsRoute(`/labs/${lesson.data.lab_id}/${lesson.data.name}?course=${courseName}`)
+	const panelW = 400
+	const screenH = window.screen.availHeight
+	const screenW = window.screen.availWidth
+	const labW = Math.max(screenW - panelW - 8, 800)
+	const monitorLeft = window.screenX
+	const monitorTop = window.screenY
+
+	// Test whether browser allows popups before committing — open blank window first.
+	const testWin = window.open('', '_blank', 'width=1,height=1,left=-9999,top=-9999')
+	if (!testWin || testWin.closed) {
+		popupBlocked.value = true
+		return
+	}
+	testWin.close()
+
+	showPopupDialog.value = false
+
+	// Open both windows in the same call stack so popup blocker allows both.
+	const sysWin = window.open('', 'lms_lab_system',
+		`width=${labW},height=${screenH},left=${monitorLeft},top=${monitorTop},resizable=yes`)
+	if (sysWin) {
+		sysWin.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Starting lab environment…</title><style>*{margin:0;padding:0;box-sizing:border-box}body{display:flex;align-items:center;justify-content:center;height:100vh;font-family:system-ui,sans-serif;background:#f8fafc;color:#374151}.wrap{text-align:center}.spinner{width:52px;height:52px;border:4px solid #e5e7eb;border-top-color:#3b82f6;border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 20px}@keyframes spin{to{transform:rotate(360deg)}}h1{font-size:1.1rem;font-weight:600;color:#111827;margin-bottom:8px}p{font-size:.875rem;color:#6b7280;line-height:1.5}</style></head><body><div class="wrap"><div class="spinner"></div><h1>Starting lab environment…</h1><p>Please wait. The system will open automatically.</p></div></body></html>`)
+		sysWin.document.close()
+	}
+	const sep = panelUrl.includes('?') ? '&' : '?'
+	const panelUrlWithMeta = `${panelUrl}${sep}monitorLeft=${monitorLeft}&monitorTop=${monitorTop}`
+	window.open(panelUrlWithMeta, 'lms_lab_panel',
+		`width=${panelW},height=${screenH},left=${monitorLeft + labW + 8},top=${monitorTop},resizable=no,scrollbars=yes`)
 }
 
 const canGoZen = () => {
@@ -1116,6 +1404,44 @@ usePageMeta(() => {
 	font-weight: 500;
 }
 
+.lab-desc-preview h2 {
+	font-size: 0.8125rem;
+	font-weight: 600;
+	color: var(--ink-gray-8, #1f2937);
+	margin-top: 0.875rem;
+	margin-bottom: 0.25rem;
+}
+
+.lab-desc-preview h2:first-child {
+	margin-top: 0;
+}
+
+.lab-desc-preview p {
+	margin-bottom: 0.4rem;
+	line-height: 1.6;
+}
+
+.lab-desc-preview ul,
+.lab-desc-preview ol {
+	padding-left: 1.25rem;
+	margin-bottom: 0.4rem;
+}
+
+.lab-desc-preview ul { list-style-type: disc; }
+.lab-desc-preview ol { list-style-type: decimal; }
+
+.lab-desc-preview li {
+	margin-bottom: 0.15rem;
+	line-height: 1.5;
+}
+
+.lab-desc-preview code {
+	background: rgba(0,0,0,0.06);
+	border-radius: 3px;
+	padding: 0.1em 0.3em;
+	font-size: 0.8em;
+}
+
 .embed-tool__caption,
 .cdx-simple-image__caption {
 	display: none;
@@ -1123,6 +1449,24 @@ usePageMeta(() => {
 
 .ce-block__content {
 	max-width: unset;
+}
+
+.codex-editor b,
+.codex-editor strong {
+	font-weight: bold;
+}
+
+.codex-editor i,
+.codex-editor em {
+	font-style: italic;
+}
+
+.codex-editor u {
+	text-decoration: underline;
+}
+
+.codex-editor s {
+	text-decoration: line-through;
 }
 
 .codex-editor__redactor {
@@ -1251,5 +1595,23 @@ usePageMeta(() => {
 :root {
 	--plyr-range-fill-background: white;
 	--plyr-video-control-background-hover: transparent;
+}
+
+.lms-dialog-fade-enter-active,
+.lms-dialog-fade-leave-active {
+	transition: opacity 0.2s ease;
+}
+.lms-dialog-fade-enter-active > div,
+.lms-dialog-fade-leave-active > div {
+	transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.lms-dialog-fade-enter-from,
+.lms-dialog-fade-leave-to {
+	opacity: 0;
+}
+.lms-dialog-fade-enter-from > div,
+.lms-dialog-fade-leave-to > div {
+	opacity: 0;
+	transform: scale(0.96) translateY(8px);
 }
 </style>

@@ -45,7 +45,7 @@ export class Markdown {
 		this.wrapper.classList.add('cdx-block', 'ce-paragraph')
 		this.wrapper.contentEditable = !this.readOnly
 		this.wrapper.dataset.placeholder = this.placeholder
-		this.wrapper.innerHTML = this.text
+		this.wrapper.innerHTML = this._normalizeInlineTags(this.text)
 
 		if (!this.readOnly) {
 			this.wrapper.addEventListener('focus', () =>
@@ -425,7 +425,16 @@ export class Markdown {
 	}
 
 	save(blockContent) {
-		return { text: blockContent.innerHTML }
+		return { text: this._normalizeInlineTags(blockContent.innerHTML) }
+	}
+
+	_normalizeInlineTags(html) {
+		if (!html) return html
+		return html
+			.replace(/<strong(\s[^>]*)?>/gi, '<b>')
+			.replace(/<\/strong>/gi, '</b>')
+			.replace(/<em(\s[^>]*)?>/gi, '<i>')
+			.replace(/<\/em>/gi, '</i>')
 	}
 
 	_isImage(text) {
