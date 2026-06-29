@@ -12,12 +12,8 @@ from frappe import _
 from frappe.utils import add_to_date, now_datetime
 
 
-def _get_connection(lab_name: str) -> tuple:
-	"""Returns (url, api_key, api_secret) for the lab's connection."""
-	lab_connection_name = frappe.db.get_value("LMS Lab", lab_name, "lab_connection")
-	if not lab_connection_name:
-		frappe.throw(_("Lab has no connection configured."))
-
+def _load_connection(lab_connection_name: str) -> tuple:
+	"""Returns (url, api_key, api_secret) for a named LMS Lab Connection."""
 	conn = frappe.get_doc("LMS Lab Connection", lab_connection_name)
 	if not conn.is_active:
 		frappe.throw(_("Lab connection '{0}' is not active.").format(lab_connection_name))
@@ -26,16 +22,109 @@ def _get_connection(lab_name: str) -> tuple:
 	return conn.url.rstrip("/"), conn.api_key, api_secret
 
 
-def _external_request(method: str, url: str, api_key: str, api_secret: str, **kwargs):
-	"""Make an authenticated request to the external Frappe system."""
+def _get_connection(lab_name: str) -> tuple:
+	"""Returns (url, api_key, api_secret) for the lab's connection."""
+	lab_connection_name = frappe.db.get_value("LMS Lab", lab_name, "lab_connection")
+	if not lab_connection_name:
+		frappe.throw(_("Lab has no connection configured."))
+	return _load_connection(lab_connection_name)
+
+
+def _raw_external_request(method: str, url: str, api_key: str, api_secret: str, **kwargs):
+	"""Make an authenticated request to the external Frappe system. Lets connection errors propagate."""
 	headers = {
 		"Authorization": f"token {api_key}:{api_secret}",
 		"Expect": "",
 	}
 	if method.upper() != "GET":
 		headers["Content-Type"] = "application/json"
-	response = requests.request(method, url, headers=headers, timeout=30, **kwargs)
-	return response
+	kwargs.setdefault("timeout", 30)
+	return requests.request(method, url, headers=headers, **kwargs)
+
+
+def _external_request(method: str, url: str, api_key: str, api_secret: str, **kwargs):
+	"""Make an authenticated request to the external Frappe system, surfacing a friendly error on failure."""
+	try:
+		return _raw_external_request(method, url, api_key, api_secret, **kwargs)
+	except requests.exceptions.RequestException:
+		# DNS failure, connection refused, timeout, etc. — the external system
+		# never produced an HTTP response at all.
+		frappe.throw(_("Could not reach the lab system. Please wait a moment and try again."))
+
+
+def validate_lab_roles(lab_doc) -> None:
+	"""
+	Checks every role configured on a Lab against the external system, so a typo
+	is caught while configuring the lab rather than surfacing as an opaque
+	user-creation failure once a student starts the session.
+	"""
+	role_names = sorted({r.role.strip() for r in (lab_doc.roles or []) if r.role and r.role.strip()})
+	if not role_names or not lab_doc.lab_connection:
+		return
+
+	try:
+		base_url, admin_key, admin_secret = _load_connection(lab_doc.lab_connection)
+	except Exception:
+		# Connection missing/inactive is already reported by the Lab Connection field itself.
+		return
+
+	try:
+		resp = _raw_external_request(
+			"GET",
+			f"{base_url}/api/resource/Role",
+			admin_key,
+			admin_secret,
+			params={
+				"filters": json.dumps([["name", "in", role_names]]),
+				"fields": json.dumps(["name"]),
+				"limit": len(role_names),
+			},
+			timeout=10,
+		)
+	except requests.exceptions.RequestException:
+		frappe.msgprint(
+			_("Could not verify roles against the external system right now. Please double-check the role names manually."),
+			indicator="orange",
+			alert=True,
+		)
+		return
+
+	if resp.status_code != 200:
+		frappe.msgprint(
+			_("Could not verify roles against the external system right now. Please double-check the role names manually."),
+			indicator="orange",
+			alert=True,
+		)
+		return
+
+	found = {row["name"] for row in resp.json().get("data", [])}
+	unknown = [r for r in role_names if r not in found]
+	if unknown:
+		frappe.throw(
+			_("These roles do not exist on the external lab system: {0}").format(", ".join(unknown))
+		)
+
+
+def _external_error_detail(resp) -> str:
+	"""
+	Build a safe, human-readable detail for a failed external-system response.
+	A genuine Frappe validation error comes back as JSON with `_server_messages`;
+	anything else (an HTML error page from a crashed backend, a proxy's 502/503/504)
+	means the lab system itself is unavailable, so its raw body is never shown to
+	the student/instructor.
+	"""
+	try:
+		data = resp.json()
+		server_messages = json.loads(data.get("_server_messages") or "[]")
+		if server_messages:
+			message = json.loads(server_messages[0]).get("message")
+			if message:
+				return message
+		if data.get("exception"):
+			return str(data["exception"]).strip().splitlines()[-1]
+	except (ValueError, TypeError, IndexError, KeyError):
+		pass
+	return _("the lab system is temporarily unavailable (HTTP {0})").format(resp.status_code)
 
 
 def _slugify(text: str) -> str:
@@ -392,7 +481,7 @@ def provision_lab_instance(lab: str, course: str, lesson: str):
 			json=company_payload,
 		)
 		if resp.status_code not in (200, 201, 409):
-			frappe.throw(_("Failed to create company: {0}").format(resp.text))
+			frappe.throw(_("Failed to create company: {0}").format(_external_error_detail(resp)))
 
 		# 2. Create User on external system; if already exists update password instead
 		configured_roles = [{"role": r.role} for r in (getattr(lab_doc, "roles", None) or [])]
@@ -422,9 +511,9 @@ def provision_lab_instance(lab: str, course: str, lesson: str):
 				json={"new_password": ext_password},
 			)
 			if resp.status_code not in (200, 201):
-				frappe.throw(_("Failed to update existing user: {0}").format(resp.text))
+				frappe.throw(_("Failed to update existing user: {0}").format(_external_error_detail(resp)))
 		elif resp.status_code not in (200, 201):
-			frappe.throw(_("Failed to create user: {0}").format(resp.text))
+			frappe.throw(_("Failed to create user: {0}").format(_external_error_detail(resp)))
 
 		# 3. Restrict user to their lab company via User Permission
 		# Without this the user sees all companies (incl. the main production company).

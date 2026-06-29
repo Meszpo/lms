@@ -48,11 +48,19 @@ def get_chapters_for_export(chapters: list):
 
 
 def get_lessons_for_export(course_name: str):
+	valid_chapters = set(
+		frappe.get_all("Chapter Reference", {"parent": course_name}, pluck="chapter")
+	)
 	lessons = frappe.get_all("Course Lesson", {"course": course_name}, pluck="name")
 	lessons_list = []
 	for lesson in lessons:
 		lesson_doc = frappe.get_doc("Course Lesson", lesson)
-		lessons_list.append(lesson_doc)
+		if lesson_doc.chapter in valid_chapters:
+			lessons_list.append(lesson_doc)
+		else:
+			frappe.log_error(
+				f"Skipping lesson '{lesson_doc.name}' during export: chapter '{lesson_doc.chapter}' is not in course chapters"
+			)
 	return lessons_list
 
 
@@ -617,10 +625,17 @@ def create_lesson_docs(zip_file, course_name, chapter_docs):
 			lesson_data = read_json_from_zip(zip_file, file)
 			lesson_data = exclude_meta_fields(lesson_data)
 			if lesson_data:
+				chapter_name = get_chapter_name_for_lesson(zip_file, lesson_data, chapter_docs)
+				if not chapter_name:
+					frappe.log_error(
+						f"Skipping lesson '{lesson_data.get('title')}' during import: "
+						f"chapter '{lesson_data.get('chapter')}' not found in imported chapters"
+					)
+					continue
 				lesson_doc = frappe.new_doc("Course Lesson")
 				lesson_doc.update(lesson_data)
 				lesson_doc.course = course_name
-				lesson_doc.chapter = get_chapter_name_for_lesson(zip_file, lesson_data, chapter_docs)
+				lesson_doc.chapter = chapter_name
 				lesson_doc.content = (
 					replace_values_in_content(zip_file, lesson_doc.content) if lesson_doc.content else None
 				)
