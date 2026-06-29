@@ -100,24 +100,40 @@
 				<div>
 					<div class="text-lg font-semibold text-ink-gray-9">{{ __('User Roles') }}</div>
 					<p class="text-xs text-ink-gray-5 mt-0.5">{{ __('Roles assigned to the student on the external system. Defaults to System Manager.') }}</p>
+					<p v-if="lab.lab_connection && !externalRoles && !loadingExternalRoles" class="text-xs text-amber-600 mt-0.5">
+						{{ __('Could not verify roles against the external system — check the names manually.') }}
+					</p>
 				</div>
 				<Button size="sm" @click="addRole">
 					<template #prefix><Plus class="w-3.5 h-3.5" /></template>
 					{{ __('Add Role') }}
 				</Button>
 			</div>
-			<div v-if="lab.roles?.length" class="space-y-2">
-				<div v-for="(r, idx) in lab.roles" :key="idx" class="flex items-center gap-2">
-					<input
-						:value="r.role"
-						type="text"
-						class="flex-1 rounded border border-outline-gray-2 px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-outline-blue-3"
-						:placeholder="__('e.g. Sales User, Accounts User')"
-						@input="setRoleValue(idx, $event.target.value)"
-					/>
-					<Button variant="ghost" size="sm" @click="removeRole(idx)">
-						<X class="w-3.5 h-3.5 stroke-1.5 text-ink-gray-5" />
-					</Button>
+			<div v-if="lab.roles?.length" class="space-y-1">
+				<div v-for="(r, idx) in lab.roles" :key="idx">
+					<div class="flex items-center gap-2">
+						<Autocomplete
+							class="flex-1"
+							:model-value="r.role"
+							:options="roleOptionsFor(idx)"
+							:placeholder="__('e.g. Sales User, Accounts User')"
+							@update:query="(q) => (roleQueries[idx] = q)"
+							@update:model-value="(opt) => setRoleValue(idx, opt?.value || '')"
+						/>
+						<Check
+							v-if="r.role?.trim() && externalRoles && !isDuplicateRole(idx) && !isUnknownRole(idx)"
+							class="w-3.5 h-3.5 text-green-500 shrink-0"
+						/>
+						<Button variant="ghost" size="sm" @click="removeRole(idx)">
+							<X class="w-3.5 h-3.5 stroke-1.5 text-ink-gray-5" />
+						</Button>
+					</div>
+					<p v-if="isDuplicateRole(idx)" class="text-xs text-red-500 mt-0.5">
+						{{ __('This role is assigned more than once.') }}
+					</p>
+					<p v-else-if="isUnknownRole(idx)" class="text-xs text-red-500 mt-0.5">
+						{{ __('Role not found on the external system.') }}
+					</p>
 				</div>
 			</div>
 			<p v-else class="text-sm text-ink-gray-5 italic">{{ __('No roles configured — will use System Manager.') }}</p>
@@ -381,11 +397,12 @@ import {
 	Dialog,
 	FormControl,
 	createDocumentResource,
+	call,
 	toast,
 	usePageMeta,
 } from 'frappe-ui'
 import { computed, defineComponent, h, inject, onMounted, onBeforeUnmount, reactive, ref, nextTick, watch } from 'vue'
-import { Plus, X, Info } from 'lucide-vue-next'
+import { Plus, X, Info, Check } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 
 // ── Markdown renderer (shared with LabWindow) ──────────────────────────────
@@ -508,6 +525,7 @@ function applyMdFormat(cmd) {
 }
 import { sessionStore } from '@/stores/session'
 import Link from '@/components/Controls/Link.vue'
+import Autocomplete from '@/components/Controls/Autocomplete.vue'
 
 // Inline PlaceholderChips component
 const PlaceholderChips = defineComponent({
@@ -814,7 +832,68 @@ const removeCriterion = (idx) => {
 	isDirty.value = true
 }
 
-// Role helpers
+// Role helpers — verify role names against the external system
+const externalRoles = ref(null) // null = not loaded/unavailable, Array = role names on the external system
+const loadingExternalRoles = ref(false)
+
+const loadExternalRoles = async () => {
+	const connection = lab.value?.lab_connection
+	if (!connection) {
+		externalRoles.value = null
+		return
+	}
+	loadingExternalRoles.value = true
+	try {
+		externalRoles.value = await call('lms.lms.api.get_external_roles', { lab_connection: connection })
+	} catch (err) {
+		externalRoles.value = null
+	} finally {
+		loadingExternalRoles.value = false
+	}
+}
+
+watch(
+	() => lab.value?.lab_connection,
+	(val, oldVal) => {
+		if (val && val !== oldVal) loadExternalRoles()
+		else if (!val) externalRoles.value = null
+	}
+)
+
+const roleCounts = computed(() => {
+	const counts = {}
+	for (const r of lab.value?.roles || []) {
+		const v = (r.role || '').trim()
+		if (v) counts[v] = (counts[v] || 0) + 1
+	}
+	return counts
+})
+
+const isDuplicateRole = (idx) => {
+	const v = (lab.value.roles[idx]?.role || '').trim()
+	return !!v && roleCounts.value[v] > 1
+}
+
+const isUnknownRole = (idx) => {
+	const v = (lab.value.roles[idx]?.role || '').trim()
+	if (!v || !externalRoles.value) return false
+	return !externalRoles.value.includes(v)
+}
+
+// What's currently typed in each row's Autocomplete search box, keyed by row index.
+// Used to offer a "Use '<text>'" option so a role not (yet) on the external system can
+// still be entered — the field underneath is plain free text, the list is just a helper.
+const roleQueries = reactive({})
+
+const roleOptionsFor = (idx) => {
+	const options = (externalRoles.value || []).map((name) => ({ label: name, value: name }))
+	const query = (roleQueries[idx] || '').trim()
+	if (query && !options.some((o) => o.value.toLowerCase() === query.toLowerCase())) {
+		options.unshift({ label: __('Use "{0}"').format(query), value: query })
+	}
+	return options
+}
+
 const addRole = () => {
 	const existing = lab.value.roles ? [...lab.value.roles] : []
 	existing.push({ role: '', doctype: 'LMS Lab Role' })
@@ -826,6 +905,7 @@ const setRoleValue = (idx, value) => {
 	const updated = [...(lab.value.roles || [])]
 	updated[idx] = { ...updated[idx], role: value }
 	lab.value.roles = updated
+	roleQueries[idx] = ''
 	isDirty.value = true
 }
 
@@ -833,6 +913,11 @@ const removeRole = (idx) => {
 	const updated = [...(lab.value.roles || [])]
 	updated.splice(idx, 1)
 	lab.value.roles = updated
+	// Shift typed search-query state down so it stays aligned with the rows that moved up.
+	for (let i = idx; i < updated.length; i++) {
+		roleQueries[i] = roleQueries[i + 1] || ''
+	}
+	delete roleQueries[updated.length]
 	isDirty.value = true
 }
 

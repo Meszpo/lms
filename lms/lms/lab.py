@@ -105,6 +105,31 @@ def validate_lab_roles(lab_doc) -> None:
 		)
 
 
+@frappe.whitelist()
+def get_external_roles(lab_connection: str) -> list:
+	"""
+	Returns every role name available on the external system for a given Lab
+	Connection, so the lab editor frontend can offer autocomplete and flag
+	unknown role names as the instructor types, instead of only finding out on save.
+	"""
+	if not frappe.has_permission("LMS Lab", "write"):
+		frappe.throw(_("Not permitted."), frappe.PermissionError)
+
+	base_url, admin_key, admin_secret = _load_connection(lab_connection)
+	resp = _raw_external_request(
+		"GET",
+		f"{base_url}/api/resource/Role",
+		admin_key,
+		admin_secret,
+		params={"fields": json.dumps(["name"]), "limit_page_length": 0},
+		timeout=10,
+	)
+	if resp.status_code != 200:
+		frappe.throw(_("Could not fetch roles from the external system."))
+
+	return sorted(row["name"] for row in resp.json().get("data", []))
+
+
 def _external_error_detail(resp) -> str:
 	"""
 	Build a safe, human-readable detail for a failed external-system response.
@@ -412,17 +437,27 @@ def provision_lab_instance(lab: str, course: str, lesson: str):
 	lab_doc = _get_lab_doc(lab)
 	base_url, admin_key, admin_secret = _get_connection(lab)
 
-	# Clean up any Failed instances so their orphaned external resources get removed
+	# Clean up any Failed instances so their orphaned external resources get removed.
+	# Enqueued rather than run inline: cleanup now walks the external system's link graph
+	# and retries deletes across multiple passes, which is too slow to do inside the
+	# student's "start lab" request — and isn't needed for it to succeed anyway, since
+	# every new instance gets its own unique company/username regardless.
 	failed_instances = frappe.get_all(
 		"LMS Lab Instance",
 		filters={"lab": lab, "member": member, "status": "Failed"},
 		pluck="name",
 	)
 	for fi in failed_instances:
-		try:
-			cleanup_lab_instance(fi, admin_key=admin_key, admin_secret=admin_secret, base_url=base_url)
-		except Exception:
-			pass
+		frappe.enqueue(
+			"lms.lms.lab.cleanup_lab_instance",
+			queue="long",
+			timeout=600,
+			now=False,
+			lab_instance=fi,
+			admin_key=admin_key,
+			admin_secret=admin_secret,
+			base_url=base_url,
+		)
 
 	ext_password = _generate_password(14)
 
@@ -917,8 +952,10 @@ def cleanup_lab_instance(
 	ext_username = instance.external_username
 	company_name = instance.company_name
 
-	# DocTypes to clean up, ordered so children/transactions come before master data.
-	# All filtered by owner = ext_username (the lab user created them).
+	# DocTypes known to be owned directly by the lab user. This is just the seed set —
+	# _expand_linked() below walks the actual link graph from the user/company so
+	# anything missing from this list (GL Entry, Stock Ledger Entry, a doctype added by
+	# some other app, ...) still gets found, instead of being silently left behind.
 	CLEANUP_DOCTYPES = [
 		# Transactions (must go before linked master data)
 		"Sales Invoice",
@@ -940,61 +977,165 @@ def cleanup_lab_instance(
 		"Item",
 	]
 
+	# DocTypes that must never be swept up and deleted even if the link graph somehow
+	# points through them — structural/system metadata, not lab session data.
+	DOCTYPE_DELETE_BLOCKLIST = {
+		"DocType", "Role", "Module Def", "Custom Field", "Property Setter",
+		"Workspace", "Print Format", "Report", "Page", "Client Script",
+		"Server Script", "Webhook", "User", "Company",
+	}
+
 	errors = []
 
-	def _fetch_names_by_owner(doctype):
-		params = {
-			"filters": json.dumps([["owner", "=", ext_username]]),
-			"fields": json.dumps(["name"]),
-			"limit": 500,
-		}
-		resp = _external_request(
-			"GET", f"{base_url}/api/resource/{doctype}", admin_key, admin_secret, params=params
+	def _fetch_names_by_filter(doctype, field, value):
+		resp = _raw_external_request(
+			"GET",
+			f"{base_url}/api/resource/{doctype}",
+			admin_key,
+			admin_secret,
+			params={
+				"filters": json.dumps([[field, "=", value]]),
+				"fields": json.dumps(["name"]),
+				"limit_page_length": 0,
+			},
+			timeout=30,
 		)
 		if resp.status_code != 200:
 			return []
 		return [row["name"] for row in resp.json().get("data", [])]
 
-	def _delete_doc(doctype, name):
-		_external_request(
-			"DELETE", f"{base_url}/api/resource/{doctype}/{name}", admin_key, admin_secret
-		)
-
-	# Delete Address and Contact records owned by the lab user first,
-	# so that Customer/Supplier deletion won't be blocked by linked records.
-	for link_doctype in ("Address", "Contact"):
+	def _cancel_doc(doctype, name):
+		"""Best-effort cancel so a submitted document can actually be deleted afterwards."""
 		try:
-			for name in _fetch_names_by_owner(link_doctype):
-				try:
-					_delete_doc(link_doctype, name)
-				except Exception as e:
-					errors.append(f"{link_doctype} {name}: {str(e)}")
-		except Exception as e:
-			errors.append(f"{link_doctype}: {str(e)}")
+			_raw_external_request(
+				"POST",
+				f"{base_url}/api/method/frappe.client.cancel",
+				admin_key,
+				admin_secret,
+				json={"doctype": doctype, "name": name},
+				timeout=30,
+			)
+		except requests.exceptions.RequestException:
+			pass
 
-	for doctype in CLEANUP_DOCTYPES:
+	def _delete_doc(doctype, name) -> bool:
 		try:
-			for name in _fetch_names_by_owner(doctype):
-				try:
-					_delete_doc(doctype, name)
-				except Exception as e:
-					errors.append(f"{doctype} {name}: {str(e)}")
+			resp = _raw_external_request(
+				"DELETE", f"{base_url}/api/resource/{doctype}/{name}", admin_key, admin_secret, timeout=30
+			)
+		except requests.exceptions.RequestException:
+			return False
+		return resp.status_code in (200, 202)
+
+	def _discover_linked(doctype, name):
+		"""
+		Everything that references (doctype, name). Safe to delete unconditionally:
+		the seed is always a unique session identifier (this instance's username/company,
+		or a document owned by it), so a Link field pointing at that exact value can only
+		belong to this lab session — never shared master/lookup data.
+		"""
+		try:
+			resp = _raw_external_request(
+				"GET",
+				f"{base_url}/api/method/frappe.desk.form.linked_with.get",
+				admin_key,
+				admin_secret,
+				params={"doctype": doctype, "docname": name},
+				timeout=30,
+			)
+		except requests.exceptions.RequestException:
+			return []
+		if resp.status_code != 200:
+			return []
+		data = (resp.json() or {}).get("message") or {}
+		out = []
+		for linked_doctype, info in data.items():
+			if linked_doctype in DOCTYPE_DELETE_BLOCKLIST:
+				continue
+			for row in info.get("docs", []) or []:
+				if row.get("name"):
+					out.append((linked_doctype, row["name"]))
+		return out
+
+	def _expand_linked(todo: set, seeds: list, max_depth: int = 2):
+		"""BFS outward from `seeds`, adding everything linked to them — and everything
+		linked to those — up to `max_depth` hops. Mutates `todo` in place. `seeds` are
+		used as BFS starting points even if already present in `todo` — that's the point
+		when seeding from "every document found so far" to also reach second-degree links."""
+		frontier = list(dict.fromkeys(seeds))
+		seen = set(todo) | set(frontier)
+		for _hop in range(max_depth):
+			next_frontier = []
+			for doctype, name in frontier:
+				for pair in _discover_linked(doctype, name):
+					if pair not in seen:
+						seen.add(pair)
+						todo.add(pair)
+						next_frontier.append(pair)
+			frontier = next_frontier
+			if not frontier:
+				break
+
+	def _drain(todo: set, max_passes: int = 8):
+		"""
+		Repeatedly try to cancel+delete every (doctype, name) in `todo`. Each pass clears
+		whatever is no longer blocked by a link to something deleted in a previous pass,
+		so this self-resolves dependency ordering instead of relying on a hand-curated
+		doctype order. Whatever is still stuck after `max_passes` is reported as an error.
+		"""
+		remaining = set(todo)
+		for _pass in range(max_passes):
+			if not remaining:
+				break
+			progressed = False
+			for doctype, name in list(remaining):
+				_cancel_doc(doctype, name)
+				if _delete_doc(doctype, name):
+					remaining.discard((doctype, name))
+					progressed = True
+			if not progressed:
+				break
+		for doctype, name in remaining:
+			errors.append(f"{doctype} {name}: still linked/blocked after {max_passes} cleanup passes")
+
+	# 1. Seed the to-delete set from documents directly owned by the lab user...
+	todo = set()
+	for doctype in ("Address", "Contact", *CLEANUP_DOCTYPES):
+		try:
+			for name in _fetch_names_by_filter(doctype, "owner", ext_username):
+				todo.add((doctype, name))
 		except Exception as e:
 			errors.append(f"{doctype}: {str(e)}")
 
-	# Delete the user
+	# ...plus anything keyed by `user` rather than `owner` (e.g. the User Permission
+	# created during provisioning is owned by the admin account, not the lab user).
 	try:
-		_external_request("DELETE", f"{base_url}/api/resource/User/{ext_username}", admin_key, admin_secret)
+		for name in _fetch_names_by_filter("User Permission", "user", ext_username):
+			todo.add(("User Permission", name))
 	except Exception as e:
-		errors.append(f"User delete: {str(e)}")
+		errors.append(f"User Permission: {str(e)}")
 
-	# Delete the company
-	try:
-		_external_request(
-			"DELETE", f"{base_url}/api/resource/Company/{company_name}", admin_key, admin_secret
-		)
-	except Exception as e:
-		errors.append(f"Company delete: {str(e)}")
+	# 2. Walk the link graph from the company and from every document found so far —
+	# catches GL Entry/Stock Ledger Entry/etc. and anything not in CLEANUP_DOCTYPES.
+	_expand_linked(todo, [("Company", company_name), *todo])
+
+	# 3. Cancel+delete everything found, retrying until nothing more can be cleared.
+	_drain(todo)
+
+	# 4. Delete the company — by now its own dependents (Account, Cost Center,
+	# Warehouse, ...) should be gone too, either via step 3 or via Company's own
+	# on_trash cleanup, which only runs once no GL Entry/Stock Ledger Entry remains.
+	if not _delete_doc("Company", company_name):
+		errors.append(f"Company {company_name}: could not delete (still linked or blocked)")
+
+	# 5. Delete the user — walk its link graph too (ToDo, assignments, and other core
+	# housekeeping records aren't owned by the user, they just point at it) and drain
+	# that before the final delete.
+	user_todo = set()
+	_expand_linked(user_todo, [("User", ext_username)])
+	_drain(user_todo)
+	if not _delete_doc("User", ext_username):
+		errors.append(f"User {ext_username}: could not delete (still linked or blocked)")
 
 	frappe.db.set_value(
 		"LMS Lab Instance",

@@ -2575,6 +2575,12 @@ def get_lab_cleanup_status(lab: str, include_active: bool = False):
 
 
 @frappe.whitelist()
+def get_external_roles(lab_connection: str):
+	from lms.lms.lab import get_external_roles as _roles
+	return _roles(lab_connection=lab_connection)
+
+
+@frappe.whitelist()
 def get_course_lab_submissions(course: str) -> dict:
 	"""Returns the best (highest percentage) submission per lab for the current user."""
 	member = frappe.session.user
