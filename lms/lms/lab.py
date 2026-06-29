@@ -11,6 +11,35 @@ import requests
 from frappe import _
 from frappe.utils import add_to_date, now_datetime
 
+# DocTypes a lab session creates data in. Shared by cleanup (delete everything a
+# session touched) and role isolation (scope each role's visibility to documents it
+# owns) so the two stay in sync — anything a session can create is both something we
+# need to tear down afterwards and something other students shouldn't see.
+SESSION_DOCTYPES = [
+	"Address",
+	"Contact",
+	"Lead",
+	"Opportunity",
+	"Quotation",
+	"Sales Order",
+	"Sales Invoice",
+	"Delivery Note",
+	"Purchase Order",
+	"Purchase Receipt",
+	"Purchase Invoice",
+	"Payment Entry",
+	"Journal Entry",
+	"Stock Entry",
+	"Customer",
+	"Supplier",
+	"Item",
+]
+
+# Roles deliberately excluded from automatic owner-isolation: these are reserved for
+# genuine administrators (e.g. the provisioning service account), not lab students, so
+# restricting them to "only documents they own" would be both wrong and surprising.
+ISOLATION_EXEMPT_ROLES = {"System Manager", "Administrator"}
+
 
 def _load_connection(lab_connection_name: str) -> tuple:
 	"""Returns (url, api_key, api_secret) for a named LMS Lab Connection."""
@@ -128,6 +157,91 @@ def get_external_roles(lab_connection: str) -> list:
 		frappe.throw(_("Could not fetch roles from the external system."))
 
 	return sorted(row["name"] for row in resp.json().get("data", []))
+
+
+
+def _ensure_owner_restricted(base_url, admin_key, admin_secret, role: str, doctype: str) -> bool:
+	"""
+	Restrict `role` to only its own documents on `doctype` (permlevel 0), via Frappe's
+	own Role Permission Manager endpoint — NOT by POSTing a Custom DocPerm directly.
+	That matters: the first time any doctype gets a Custom DocPerm row, Frappe stops
+	falling back to standard DocPerm for *every* role on that doctype, not just the one
+	being restricted. The permission_manager.update endpoint handles this correctly by
+	copying every role's current standard permissions into Custom DocPerm first (via
+	`setup_custom_perms`) if that doctype doesn't have any custom rows yet, so roles we
+	never touch keep exactly the access they had. It's also safe to call repeatedly —
+	it updates the existing override row instead of creating a duplicate.
+
+	Returns True on success or when the role has no standard access to this doctype at
+	all (nothing to restrict). False only when the external system couldn't be reached.
+	"""
+	meta_resp = _raw_external_request(
+		"GET", f"{base_url}/api/resource/DocType/{doctype}", admin_key, admin_secret, timeout=30
+	)
+	if meta_resp.status_code != 200:
+		return False
+
+	perms = (meta_resp.json().get("data") or {}).get("permissions") or []
+	has_standard_access = any(
+		p.get("role") == role and (p.get("permlevel") or 0) == 0 for p in perms
+	)
+	if not has_standard_access:
+		return True
+
+	resp = _raw_external_request(
+		"POST",
+		f"{base_url}/api/method/frappe.core.page.permission_manager.permission_manager.update",
+		admin_key,
+		admin_secret,
+		json={"doctype": doctype, "role": role, "permlevel": 0, "ptype": "if_owner", "value": "1"},
+		timeout=30,
+	)
+	return resp.status_code == 200
+
+
+def ensure_role_isolation(lab_doc) -> None:
+	"""
+	Restricts each role assigned to this lab's students so they only see documents
+	they own across SESSION_DOCTYPES (Customer, Item, Address, Sales Order, ...) —
+	otherwise every student sees every other student's (and any pre-existing demo)
+	data on the external system, which defeats the point of a sandboxed lab session.
+	Best-effort and non-blocking: failures here shouldn't stop a lab from being saved.
+	"""
+	if not lab_doc.lab_connection:
+		return
+
+	role_names = sorted({
+		r.role.strip()
+		for r in (lab_doc.roles or [])
+		if r.role and r.role.strip() and r.role.strip() not in ISOLATION_EXEMPT_ROLES
+	})
+	if not role_names:
+		return
+
+	try:
+		base_url, admin_key, admin_secret = _load_connection(lab_doc.lab_connection)
+	except Exception:
+		return
+
+	failed = False
+	for role in role_names:
+		for doctype in SESSION_DOCTYPES:
+			try:
+				if not _ensure_owner_restricted(base_url, admin_key, admin_secret, role, doctype):
+					failed = True
+			except requests.exceptions.RequestException:
+				failed = True
+
+	if failed:
+		frappe.msgprint(
+			_(
+				"Could not fully restrict role visibility on the external system. "
+				"Some roles/doctypes may still show other students' documents — "
+				"check the Role Permission Manager there manually."
+			),
+			indicator="orange",
+			alert=True,
+		)
 
 
 def _external_error_detail(resp) -> str:
@@ -949,6 +1063,52 @@ def cleanup_lab_instance(
 	if not base_url or not admin_key or not admin_secret:
 		base_url, admin_key, admin_secret = _get_connection(instance.lab)
 
+	try:
+		result = _do_cleanup(lab_instance, instance, base_url, admin_key, admin_secret)
+	except Exception as e:
+		# Without this, anything that interrupts cleanup mid-run (a timed-out request, a
+		# worker getting killed, ...) leaves the instance stuck on "Cleaning" forever —
+		# provision_lab_instance only ever retries instances marked "Failed".
+		frappe.db.set_value(
+			"LMS Lab Instance", lab_instance, {"status": "Failed", "error_log": str(e)}
+		)
+		frappe.db.commit()
+		_notify_cleanup_failure(instance, str(e))
+		raise
+
+	if result.get("errors"):
+		# The student can't act on this — only someone with access to the external
+		# system can — so they're never shown it; course staff get notified instead.
+		_notify_cleanup_failure(instance, "\n".join(result["errors"]))
+	return result
+
+
+def _notify_cleanup_failure(instance, error: str) -> None:
+	"""Lets course staff know a lab session's data on the external system couldn't be
+	fully removed, since the student has no way to act on it themselves."""
+	from frappe.desk.doctype.notification_log.notification_log import make_notification_logs
+	from frappe.utils.user import get_users_with_role
+
+	try:
+		users = get_users_with_role("Course Creator")
+		if not users:
+			return
+		notification = frappe._dict({
+			"subject": _("Could not fully clean up lab data for {0} on the external system.").format(
+				instance.member
+			),
+			"email_content": frappe.utils.escape_html(error)[:1000],
+			"document_type": "LMS Lab Instance",
+			"document_name": instance.name,
+			"type": "Alert",
+		})
+		make_notification_logs(notification, users)
+	except Exception:
+		# Best-effort — a failed notification shouldn't mask the original cleanup error.
+		pass
+
+
+def _do_cleanup(lab_instance: str, instance, base_url: str, admin_key: str, admin_secret: str) -> dict:
 	ext_username = instance.external_username
 	company_name = instance.company_name
 
@@ -956,26 +1116,6 @@ def cleanup_lab_instance(
 	# _expand_linked() below walks the actual link graph from the user/company so
 	# anything missing from this list (GL Entry, Stock Ledger Entry, a doctype added by
 	# some other app, ...) still gets found, instead of being silently left behind.
-	CLEANUP_DOCTYPES = [
-		# Transactions (must go before linked master data)
-		"Sales Invoice",
-		"Purchase Invoice",
-		"Sales Order",
-		"Purchase Order",
-		"Delivery Note",
-		"Purchase Receipt",
-		"Payment Entry",
-		"Journal Entry",
-		"Stock Entry",
-		"Quotation",
-		# CRM
-		"Opportunity",
-		"Lead",
-		# Master data that may have Address/Contact links
-		"Customer",
-		"Supplier",
-		"Item",
-	]
 
 	# DocTypes that must never be swept up and deleted even if the link graph somehow
 	# points through them — structural/system metadata, not lab session data.
@@ -1100,7 +1240,7 @@ def cleanup_lab_instance(
 
 	# 1. Seed the to-delete set from documents directly owned by the lab user...
 	todo = set()
-	for doctype in ("Address", "Contact", *CLEANUP_DOCTYPES):
+	for doctype in SESSION_DOCTYPES:
 		try:
 			for name in _fetch_names_by_filter(doctype, "owner", ext_username):
 				todo.add((doctype, name))
@@ -1125,17 +1265,17 @@ def cleanup_lab_instance(
 	# 4. Delete the company — by now its own dependents (Account, Cost Center,
 	# Warehouse, ...) should be gone too, either via step 3 or via Company's own
 	# on_trash cleanup, which only runs once no GL Entry/Stock Ledger Entry remains.
-	if not _delete_doc("Company", company_name):
-		errors.append(f"Company {company_name}: could not delete (still linked or blocked)")
+	# Routed through _drain (not a single _delete_doc call) so a transient failure on
+	# the external system gets retried instead of being reported as permanently stuck.
+	_drain({("Company", company_name)})
 
 	# 5. Delete the user — walk its link graph too (ToDo, assignments, and other core
 	# housekeeping records aren't owned by the user, they just point at it) and drain
 	# that before the final delete.
 	user_todo = set()
 	_expand_linked(user_todo, [("User", ext_username)])
+	user_todo.add(("User", ext_username))
 	_drain(user_todo)
-	if not _delete_doc("User", ext_username):
-		errors.append(f"User {ext_username}: could not delete (still linked or blocked)")
 
 	frappe.db.set_value(
 		"LMS Lab Instance",
