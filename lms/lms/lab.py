@@ -5,6 +5,7 @@ import json
 import re
 import secrets
 import string
+import unicodedata
 
 import frappe
 import requests
@@ -352,7 +353,40 @@ def _generate_session_data(token: str) -> dict:
 	contact_first = first
 	contact_last = last
 	email_domain = re.sub(r"[^a-z0-9]+", "", company_core.lower()) or "firma"
-	contact_email = f"{first.lower()}.{re.sub(r'[^a-z]', '', last.lower())}@{email_domain}.pl"
+
+	# Email local part must be ASCII (SMTP validator in this stack
+	# rejects Unicode characters, so we transliterate Polish diacritics first).
+	def _ascii_email_local_part(value: str) -> str:
+		value = (value or "").strip().lower()
+		if not value:
+			return ""
+
+		# Polish-specific transliteration to keep letters (e.g. paweł -> pawel).
+		translit = {
+			"ą": "a",
+			"ć": "c",
+			"ę": "e",
+			"ł": "l",
+			"ń": "n",
+			"ó": "o",
+			"ś": "s",
+			"ż": "z",
+			"ź": "z",
+			"ß": "ss",  # just in case
+		}
+		for src, dst in translit.items():
+			value = value.replace(src, dst)
+
+		# Generic fallback for any remaining diacritics.
+		value = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("ascii")
+
+		# Keep only allowed local-part characters used by the generator.
+		value = re.sub(r"[^a-z0-9]", "", value)
+		return value
+
+	contact_first_local = _ascii_email_local_part(first) or "contact"
+	contact_last_local = _ascii_email_local_part(last) or "person"
+	contact_email = f"{contact_first_local}.{contact_last_local}@{email_domain}.pl"
 
 	item_name = f"{item_core} {item_variant} {token}"
 	item_code = f"{re.sub(r'[^A-Z0-9]', '', item_core.upper())[:6]}-{token}"
@@ -497,6 +531,20 @@ def provision_lab_instance(lab: str, course: str, lesson: str):
 	if member == "Guest":
 		frappe.throw(_("Please login to start a lab."))
 
+	lab_doc = _get_lab_doc(lab)
+	max_attempts = lab_doc.max_attempts or 0
+	if max_attempts > 0:
+		used_attempts = frappe.db.count(
+			"LMS Lab Submission", {"lab": lab, "lesson": lesson, "member": member}
+		)
+		if used_attempts >= max_attempts:
+			frappe.throw(
+				_("You have exceeded the maximum number of attempts ({0}) for this lab").format(
+					max_attempts
+				),
+				frappe.ValidationError,
+			)
+
 	# Auto-enroll the student if they don't have an enrollment record yet.
 	if not frappe.db.exists("LMS Enrollment", {"course": course, "member": member}):
 		try:
@@ -548,7 +596,6 @@ def provision_lab_instance(lab: str, course: str, lesson: str):
 			frappe.ValidationError,
 		)
 
-	lab_doc = _get_lab_doc(lab)
 	base_url, admin_key, admin_secret = _get_connection(lab)
 
 	# Clean up any Failed instances so their orphaned external resources get removed.
@@ -930,7 +977,7 @@ def _run_evaluate_lab(lab, lesson, course, member, instance_name, save_progress)
 			)
 
 			if resp.status_code != 200:
-				details = f"Could not connect to the lab system (HTTP {resp.status_code})."
+				details = _("Could not connect to the lab system (HTTP {0}).").format(resp.status_code)
 			else:
 				data = resp.json().get("data", [])
 				op = criterion.comparison_operator or "Exists"
@@ -941,7 +988,7 @@ def _run_evaluate_lab(lab, lesson, course, member, instance_name, save_progress)
 					details = (
 						""
 						if passed
-						else f"No {doctype_label} record matching the required criteria was found."
+						else _("No {0} record matching the required criteria was found.").format(doctype_label)
 					)
 				elif data and criterion.field_to_check:
 					actual = str(data[0].get(criterion.field_to_check, ""))
@@ -955,32 +1002,38 @@ def _run_evaluate_lab(lab, lesson, course, member, instance_name, save_progress)
 							except (ValueError, TypeError):
 								passed = False
 						if not passed:
-							details = f"Expected '{expected}', but found '{actual}'."
+							details = _("Expected '{0}', but found '{1}'.").format(expected, actual)
 					elif op == "Contains":
 						passed = expected in actual
 						if not passed:
-							details = f"Expected the value to contain '{expected}', but got '{actual}'."
+							details = _("Expected the value to contain '{0}', but got '{1}'.").format(
+								expected, actual
+							)
 					elif op == "Greater Than":
 						try:
 							passed = float(actual) > float(expected)
 						except ValueError:
 							passed = actual > expected
 						if not passed:
-							details = f"Expected a value greater than {expected}, but got '{actual}'."
+							details = _("Expected a value greater than {0}, but got '{1}'.").format(
+								expected, actual
+							)
 					elif op == "Less Than":
 						try:
 							passed = float(actual) < float(expected)
 						except ValueError:
 							passed = actual < expected
 						if not passed:
-							details = f"Expected a value less than {expected}, but got '{actual}'."
+							details = _("Expected a value less than {0}, but got '{1}'.").format(
+								expected, actual
+							)
 					if passed:
 						details = ""
 				else:
-					details = f"No {doctype_label} record was found to check the required field."
+					details = _("No {0} record was found to check the required field.").format(doctype_label)
 
 		except Exception as e:
-			details = f"An error occurred during evaluation: {str(e)}"
+			details = _("An error occurred during evaluation: {0}").format(str(e))
 
 		if passed:
 			score += criterion.points
@@ -1017,6 +1070,15 @@ def _run_evaluate_lab(lab, lesson, course, member, instance_name, save_progress)
 	)
 	submission.insert(ignore_permissions=True)
 	frappe.db.commit()
+
+	try:
+		frappe.publish_realtime(
+			event="lab_evaluated",
+			message={"lab": lab, "lesson": lesson, "submission": submission.name},
+			user=member,
+		)
+	except Exception:
+		pass
 
 	# Cleanup environment regardless of pass/fail
 	try:

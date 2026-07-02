@@ -2523,12 +2523,41 @@ def import_course_from_zip(zip_file_path: str):
 
 # ── Interactive Lab API ────────────────────────────────────────────────────────
 
+def _serialize_lab_submission(sub: dict) -> dict:
+	results = frappe.get_all(
+		"LMS Lab Result",
+		filters={"parent": sub["name"]},
+		fields=["criterion_name", "doctype_checked", "points_earned", "max_points", "passed", "details"],
+		order_by="idx asc",
+	)
+	sub["results"] = results
+	return sub
+
+
+def _get_lab_attempt_info(lab: str, lesson: str, member: str) -> dict:
+	max_attempts = frappe.db.get_value("LMS Lab", lab, "max_attempts") or 0
+	used_attempts = frappe.db.count(
+		"LMS Lab Submission", {"lab": lab, "lesson": lesson, "member": member}
+	)
+	info = {"used_attempts": used_attempts, "max_attempts": max_attempts}
+	if max_attempts > 0:
+		info["remaining_attempts"] = max(0, max_attempts - used_attempts)
+	else:
+		info["remaining_attempts"] = None
+	return info
+
+
 @frappe.whitelist()
-def get_lab_info(lab: str):
-	"""Returns public metadata (title, description) for a lab — no provisioning required."""
-	data = frappe.db.get_value("LMS Lab", lab, ["title", "description"], as_dict=True)
+def get_lab_info(lab: str, lesson: str = None):
+	"""Returns public metadata (title, description, attempt limits) for a lab."""
+	data = frappe.db.get_value(
+		"LMS Lab", lab, ["title", "description", "max_attempts"], as_dict=True
+	)
 	if not data:
 		frappe.throw(frappe._("Lab {0} not found").format(lab))
+	member = frappe.session.user
+	if lesson and member != "Guest":
+		data.update(_get_lab_attempt_info(lab, lesson, member))
 	return data
 
 
@@ -2612,22 +2641,20 @@ def get_course_lab_submissions(course: str) -> dict:
 @frappe.whitelist()
 def get_last_lab_submission(lab: str, lesson: str):
 	"""Returns the most recent LMS Lab Submission for the current user and lesson."""
+	submissions = get_lab_submissions(lab=lab, lesson=lesson)
+	return submissions[0] if submissions else None
+
+
+@frappe.whitelist()
+def get_lab_submissions(lab: str, lesson: str):
+	"""Returns all LMS Lab Submissions for the current user and lesson, newest first."""
 	member = frappe.session.user
+	if member == "Guest":
+		return []
 	submissions = frappe.get_all(
 		"LMS Lab Submission",
 		filters={"lab": lab, "lesson": lesson, "member": member},
 		fields=["name", "score", "max_score", "percentage", "status", "submission_time", "passing_percentage"],
 		order_by="submission_time desc",
-		limit=1,
 	)
-	if not submissions:
-		return None
-	sub = submissions[0]
-	results = frappe.get_all(
-		"LMS Lab Result",
-		filters={"parent": sub.name},
-		fields=["criterion_name", "doctype_checked", "points_earned", "max_points", "passed", "details"],
-		order_by="idx asc",
-	)
-	sub["results"] = results
-	return sub
+	return [_serialize_lab_submission(sub) for sub in submissions]

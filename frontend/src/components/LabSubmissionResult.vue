@@ -11,9 +11,14 @@
 					{{ submission.status === 'Pass' ? __('Lab Passed') : __('Lab Failed') }}
 				</span>
 			</div>
-			<div class="text-sm text-ink-gray-5">
-				{{ submission.score }} / {{ submission.max_score }} pts
-				({{ Number(submission.percentage).toFixed(1) }}%)
+			<div class="text-sm text-ink-gray-5 text-right">
+				<p v-if="submission.submission_time" class="text-xs mb-0.5">
+					{{ formatSubmissionTime(submission.submission_time) }}
+				</p>
+				<p>
+					{{ submission.score }} / {{ submission.max_score }} {{ __('pts') }}
+					({{ Number(submission.percentage).toFixed(1) }}%)
+				</p>
 			</div>
 		</div>
 
@@ -46,4 +51,13 @@ defineProps({
 		required: true,
 	},
 })
+
+function formatSubmissionTime(value) {
+	if (!value) return ''
+	try {
+		return new Date(value).toLocaleString()
+	} catch {
+		return value
+	}
+}
 </script>

@@ -252,18 +252,77 @@
 								<p v-else class="text-sm text-ink-gray-6 mb-4">
 									{{ __('This lesson includes an interactive lab. You will work in a live Frappe/ERPNext environment and your work will be automatically evaluated.') }}
 								</p>
+								<div
+									v-if="labInfo?.max_attempts"
+									class="text-sm text-ink-gray-6 mb-3"
+								>
+									{{ __('Attempts remaining: {0} of {1}').format(labInfo.remaining_attempts, labInfo.max_attempts) }}
+								</div>
+								<div
+									v-if="labSessionBusy && !selectedLabSubmission"
+									class="text-sm text-ink-gray-6 mb-3 flex items-center gap-2"
+								>
+									<span class="inline-block size-3.5 border-2 border-ink-blue-3 border-t-transparent rounded-full animate-spin shrink-0"></span>
+									<span>
+										{{ labSessionStatus === 'Evaluating'
+											? __('Evaluating your lab…')
+											: __('Cleaning up lab environment…') }}
+									</span>
+								</div>
+								<div
+									v-else-if="labSessionBusy && selectedLabSubmission"
+									class="text-xs text-ink-gray-5 mb-3 flex items-center gap-2"
+								>
+									<span class="inline-block size-3 border-2 border-ink-gray-4 border-t-transparent rounded-full animate-spin shrink-0"></span>
+									<span>{{ __('Cleaning up lab environment…') }}</span>
+								</div>
+								<div
+									v-if="labSubmissions.length > 1"
+									class="flex items-center justify-between mb-3"
+								>
+									<span class="text-xs text-ink-gray-5">
+										{{ __('Attempt {0} of {1}').format(
+											labSubmissions.length - selectedSubmissionIndex,
+											labSubmissions.length,
+										) }}
+									</span>
+									<div class="flex items-center gap-1">
+										<Button
+											variant="ghost"
+											size="sm"
+											:disabled="selectedSubmissionIndex >= labSubmissions.length - 1"
+											@click="selectOlderSubmission"
+										>
+											<template #icon><ChevronLeft class="size-4" /></template>
+										</Button>
+										<Button
+											variant="ghost"
+											size="sm"
+											:disabled="selectedSubmissionIndex <= 0"
+											@click="selectNewerSubmission"
+										>
+											<template #icon><ChevronRight class="size-4" /></template>
+										</Button>
+									</div>
+								</div>
 								<LabSubmissionResult
-									v-if="lastLabSubmission"
-									:submission="lastLabSubmission"
+									v-if="selectedLabSubmission"
+									:submission="selectedLabSubmission"
 								/>
+								<p
+									v-if="!canStartLab && !labSessionBusy"
+									class="text-sm text-ink-red-3 mb-2"
+								>
+									{{ __('You have used all available attempts for this lab.') }}
+								</p>
 								<Button
 									variant="solid"
-									:disabled="labCleaning"
+									:disabled="labCleaning || !canStartLab"
 									@click="openLabWindow"
 									class="mt-2"
 								>
 									<template #prefix><FlaskConical class="size-4" /></template>
-									{{ lastLabSubmission ? __('Retry Lab') : __('Start Lab') }}
+									{{ selectedLabSubmission ? __('Retry Lab') : __('Start Lab') }}
 								</Button>
 							</div>
 						</div>
@@ -517,18 +576,24 @@ onMounted(() => {
 				e.data?.type === 'lab_evaluated' &&
 				e.data.lab === lesson.data?.lab_id
 			) {
-				loadLastLabSubmission()
+				onLabEvaluated()
 			} else if (
 				e.data?.type === 'lab_ended' &&
 				e.data.lab === lesson.data?.lab_id
 			) {
 				labEndedAt = new Date()
-				labEndedLastSubmissionName = lastLabSubmission.value?.name || null
+				labEndedLastSubmissionName = selectedLabSubmission.value?.name || null
 				labCleaning.value = true
+				startResultPolling()
 				startCleanupPolling()
 			}
 		}
 	}
+	socket.on('lab_evaluated', (data) => {
+		if (data.lab === lesson.data?.lab_id && data.lesson === lesson.data?.name) {
+			onLabEvaluated()
+		}
+	})
 })
 
 const attachFullscreenEvent = () => {
@@ -548,7 +613,9 @@ onBeforeUnmount(() => {
 	if (!props.embedded) sidebarStore.isSidebarCollapsed = false
 	trackVideoWatchDuration()
 	if (labBroadcastChannel) labBroadcastChannel.close()
+	socket.off('lab_evaluated')
 	if (labCleanupPoller) { clearInterval(labCleanupPoller); labCleanupPoller = null }
+	if (labResultPoller) { clearInterval(labResultPoller); labResultPoller = null }
 })
 
 const lesson = createResource({
@@ -594,7 +661,7 @@ const setupLesson = (data) => {
 		checkIfDiscussionsAllowed()
 	})
 	checkQuiz()
-	loadLastLabSubmission()
+	loadLabSubmissions()
 	loadLabInfo()
 	checkLabCleanupStatus()
 }
@@ -1088,51 +1155,114 @@ const showVideoStats = () => {
 }
 
 // Interactive Lab
-const lastLabSubmission = ref(null)
+const labSubmissions = ref([])
+const selectedSubmissionIndex = ref(0)
+const selectedLabSubmission = computed(
+	() => labSubmissions.value[selectedSubmissionIndex.value] || null,
+)
 const labInfo = ref(null)
 const labCleaning = ref(false)
+const labSessionStatus = ref(null)
 let labCleanupPoller = null
+let labResultPoller = null
 let labBroadcastChannel = null
-let labEndedAt = null // timestamp when lab_ended broadcast was received
-let labEndedLastSubmissionName = null // name of last submission at time of lab_ended
+let labEndedAt = null
+let labEndedLastSubmissionName = null
+
+const canStartLab = computed(() => {
+	if (!labInfo.value?.max_attempts) return true
+	if (labInfo.value.remaining_attempts === null) return true
+	return labInfo.value.remaining_attempts > 0
+})
+
+const labSessionBusy = computed(() => labCleaning.value)
+
+const selectNewerSubmission = () => {
+	if (selectedSubmissionIndex.value > 0) selectedSubmissionIndex.value -= 1
+}
+
+const selectOlderSubmission = () => {
+	if (selectedSubmissionIndex.value < labSubmissions.value.length - 1) {
+		selectedSubmissionIndex.value += 1
+	}
+}
+
+const markLabLessonComplete = async () => {
+	const name = lesson.data?.name
+	if (name) {
+		completedLesson.value = name
+		emit('lesson-completed', name)
+	}
+	try {
+		const updated = await call(
+			'lms.lms.doctype.course_lesson.course_lesson.save_progress',
+			{ lesson: lesson.data.name, course: props.courseName },
+		)
+		if (updated) {
+			lessonProgress.value = updated
+			emit('progress-updated', updated)
+		}
+	} catch {}
+}
+
+const handleNewSubmission = async (sub) => {
+	if (!sub || sub.name === labEndedLastSubmissionName) return false
+	selectedSubmissionIndex.value = 0
+	if (sub.status === 'Pass') {
+		await markLabLessonComplete()
+	}
+	await loadLabInfo()
+	return true
+}
+
+const pollEvaluationResult = async () => {
+	await loadLabSubmissions()
+	return handleNewSubmission(labSubmissions.value[0])
+}
+
+const startResultPolling = async () => {
+	if (labResultPoller) return
+	const done = await pollEvaluationResult()
+	if (done) return
+	labResultPoller = setInterval(async () => {
+		const done = await pollEvaluationResult()
+		if (done) {
+			clearInterval(labResultPoller)
+			labResultPoller = null
+		}
+	}, 2000)
+}
+
+const onLabEvaluated = async () => {
+	await loadLabSubmissions()
+	selectedSubmissionIndex.value = 0
+	await loadLabInfo()
+	const sub = labSubmissions.value[0]
+	if (sub?.status === 'Pass') {
+		await markLabLessonComplete()
+	}
+}
 
 const pollCleanupOnce = async () => {
 	const labId = lesson.data?.lab_id
-	if (!labId) return
+	if (!labId) return true
 	try {
 		const res = await call('lms.lms.api.get_lab_cleanup_status', {
 			lab: labId,
 			include_active: true,
 		})
+		labSessionStatus.value = res?.status || null
+		if (res?.status === 'Evaluating') {
+			await pollEvaluationResult()
+		}
 		if (!res?.cleaning) {
 			labCleaning.value = false
+			labSessionStatus.value = null
 			if (labCleanupPoller) { clearInterval(labCleanupPoller); labCleanupPoller = null }
-			await loadLastLabSubmission()
-			// Only treat as a new result if a different (newer) submission appeared
-			const sub = lastLabSubmission.value
-			const isNewResult = sub && (sub.name !== labEndedLastSubmissionName)
-			if (isNewResult && sub.status === 'Pass') {
-				const name = lesson.data?.name
-				if (name) {
-					completedLesson.value = name
-					emit('lesson-completed', name)
-				}
-				// Update progress bar — save_progress ran server-side and published
-				// a realtime event, but fetch it explicitly as a fallback in case
-				// the socket event was missed.
-				try {
-					const updated = await call(
-						'lms.lms.doctype.course_lesson.course_lesson.save_progress',
-						{ lesson: lesson.data.name, course: props.courseName }
-					)
-					if (updated) {
-						lessonProgress.value = updated
-						emit('progress-updated', updated)
-					}
-				} catch {}
-			}
+			await loadLabInfo()
 			return true
 		}
+		labCleaning.value = true
 	} catch {}
 	return false
 }
@@ -1150,18 +1280,29 @@ const startCleanupPolling = async () => {
 const checkLabCleanupStatus = async () => {
 	if (!lesson.data?.lab_id) return
 	try {
-		const res = await call('lms.lms.api.get_lab_cleanup_status', { lab: lesson.data.lab_id })
+		const res = await call('lms.lms.api.get_lab_cleanup_status', {
+			lab: lesson.data.lab_id,
+			include_active: true,
+		})
 		labCleaning.value = res?.cleaning || false
-		if (labCleaning.value) startCleanupPolling()
+		labSessionStatus.value = res?.status || null
+		if (labCleaning.value) {
+			startResultPolling()
+			startCleanupPolling()
+		}
 	} catch {
 		labCleaning.value = false
+		labSessionStatus.value = null
 	}
 }
 
 const loadLabInfo = async () => {
 	if (!lesson.data?.lab_id) return
 	try {
-		labInfo.value = await call('lms.lms.api.get_lab_info', { lab: lesson.data.lab_id })
+		labInfo.value = await call('lms.lms.api.get_lab_info', {
+			lab: lesson.data.lab_id,
+			lesson: lesson.data.name,
+		})
 	} catch {
 		labInfo.value = null
 	}
@@ -1205,16 +1346,20 @@ function renderLabDesc(text) {
 	return out.join('\n')
 }
 
-const loadLastLabSubmission = async () => {
+const loadLabSubmissions = async () => {
 	if (!lesson.data?.lab_id) return
 	try {
-		const data = await call('lms.lms.api.get_last_lab_submission', {
+		const data = await call('lms.lms.api.get_lab_submissions', {
 			lab: lesson.data.lab_id,
 			lesson: lesson.data.name,
 		})
-		lastLabSubmission.value = data
+		labSubmissions.value = data || []
+		if (selectedSubmissionIndex.value >= labSubmissions.value.length) {
+			selectedSubmissionIndex.value = 0
+		}
 	} catch {
-		lastLabSubmission.value = null
+		labSubmissions.value = []
+		selectedSubmissionIndex.value = 0
 	}
 }
 
