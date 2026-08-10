@@ -520,25 +520,28 @@ function renderedStep(step) {
 }
 
 async function handleBodyClick(event) {
+	// Copy chip takes priority — must be checked before task-item so chips inside
+	// `- [ ]` lines are not swallowed by the checkbox handler.
+	const chip = event.target.closest('.lms-copy-chip')
+	if (chip) {
+		if (chip.dataset.copied) return
+		const value = chip.dataset.copy
+		try {
+			await navigator.clipboard.writeText(value)
+			chip.dataset.copied = '1'
+			setTimeout(() => delete chip.dataset.copied, 1600)
+		} catch {
+			toast({ title: value, icon: 'info' })
+		}
+		return
+	}
+
 	// Task checkbox — prevent native toggle; manage state ourselves
 	const taskItem = event.target.closest('[data-task-item]')
 	if (taskItem) {
 		event.preventDefault()
 		const box = taskItem.querySelector('input.task-check')
 		if (box) handleBoxClick(parseInt(box.dataset.stepIdx), parseInt(box.dataset.boxIdx))
-		return
-	}
-
-	// Copy chip
-	const chip = event.target.closest('.lms-copy-chip')
-	if (!chip || chip.dataset.copied) return
-	const value = chip.dataset.copy
-	try {
-		await navigator.clipboard.writeText(value)
-		chip.dataset.copied = '1'
-		setTimeout(() => delete chip.dataset.copied, 1600)
-	} catch {
-		toast({ title: value, icon: 'info' })
 	}
 }
 

@@ -223,12 +223,7 @@
 							class="flex justify-between text-sm py-2 my-1 text-ink-gray-9"
 						>
 							<div class="">
-								<span class="me-3 text-xs">
-									{{ progress.chapter_idx }}.{{ progress.idx }}
-								</span>
-								<span>
-									{{ progress.title }}
-								</span>
+								{{ progress.title }}
 							</div>
 							<Tooltip :text="String(progress.completion_count)">
 								<div>
