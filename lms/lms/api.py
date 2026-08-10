@@ -2293,11 +2293,13 @@ def get_course_assessment_progress(course: str, member: str):
 	quizzes = get_course_quiz_progress(course, member)
 	assignments = get_course_assignment_progress(course, member)
 	programming_exercises = get_course_programming_exercise_progress(course, member)
+	labs = get_course_lab_progress(course, member)
 
 	return {
 		"quizzes": quizzes,
 		"assignments": assignments,
 		"exercises": programming_exercises,
+		"labs": labs,
 	}
 
 
@@ -2387,6 +2389,33 @@ def get_course_programming_exercise_progress(course: str, member: str):
 			)
 
 	return submissions
+
+
+def get_course_lab_progress(course: str, member: str):
+	lessons = frappe.get_all(
+		"Course Lesson",
+		{"course": course, "lab_id": ["is", "set"]},
+		["name", "title", "lab_id"],
+	)
+	result = []
+	for lesson in lessons:
+		lab_title = frappe.db.get_value("LMS Lab", lesson.lab_id, "title") or lesson.lab_id
+		best = frappe.db.get_value(
+			"LMS Lab Submission",
+			{"lab": lesson.lab_id, "lesson": lesson.name, "member": member},
+			["percentage", "status"],
+			as_dict=True,
+			order_by="percentage desc",
+		)
+		result.append({
+			"lab": lesson.lab_id,
+			"lab_title": lab_title,
+			"lesson": lesson.name,
+			"lesson_title": lesson.title,
+			"percentage": float(best.percentage) if best else 0,
+			"status": best.status if best else "Not Attempted",
+		})
+	return result
 
 
 def get_assessment_from_lesson(course: str, assessment_type: str):

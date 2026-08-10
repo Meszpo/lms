@@ -47,28 +47,30 @@
 						</div>
 						<div
 							v-for="progress in lessons.data"
-							class="flex justify-between text-sm py-2 my-1"
+							class="flex items-center justify-between text-sm py-2 my-1 gap-x-2"
 						>
-							<div class="">
-								<span class="me-3 text-xs">
-									{{ progress.chapter_idx }}.{{ progress.idx }}
-								</span>
-								<span>
-									{{ progress.title }}
-								</span>
+							<div class="flex-1 min-w-0">
+								{{ progress.title }}
 							</div>
-							<Tooltip
-								v-if="getLessonStatus(progress) == 'Complete'"
-								:text="__('Complete')"
-							>
-								<Check class="text-ink-green-3 size-4" />
-							</Tooltip>
-							<Tooltip v-else :text="__('Pending')">
-								<Minus class="text-ink-amber-2 size-4" />
-							</Tooltip>
-							<!-- <Badge :theme="getLessonStatusTheme(progress)">
-								{{ getLessonStatus(progress) }}
-							</Badge> -->
+							<div class="flex items-center gap-x-2 shrink-0">
+								<template v-if="getLabForLesson(progress)">
+									<Tooltip :text="__('Lab')">
+										<FlaskConical class="size-3.5 text-ink-gray-5" />
+									</Tooltip>
+									<span class="text-xs text-ink-gray-7">
+										{{ Math.ceil(getLabForLesson(progress).percentage) }}%
+									</span>
+								</template>
+								<Tooltip
+									v-if="getLessonStatus(progress) == 'Complete'"
+									:text="__('Complete')"
+								>
+									<Check class="text-ink-green-3 size-4" />
+								</Tooltip>
+								<Tooltip v-else :text="__('Pending')">
+									<Minus class="text-ink-amber-2 size-4" />
+								</Tooltip>
+							</div>
 						</div>
 					</div>
 
@@ -145,6 +147,7 @@
 								</Badge>
 							</div>
 						</div>
+
 					</div>
 				</div>
 			</div>
@@ -162,7 +165,7 @@ import {
 } from 'frappe-ui'
 import ProgressBar from '@/components/ProgressBar.vue'
 import { computed } from 'vue'
-import { Check, Minus } from 'lucide-vue-next'
+import { Check, FlaskConical, Minus } from 'lucide-vue-next'
 
 const show = defineModel<boolean>({ required: true, default: false })
 
@@ -190,6 +193,12 @@ const assessmentProgress = createResource({
 	},
 	auto: true,
 })
+
+const getLabForLesson = (lesson: any) => {
+	return assessmentProgress.data?.labs?.find(
+		(lab: any) => lab.lesson === lesson.lesson_name
+	) || null
+}
 
 const getLessonStatus = (lesson: any) => {
 	return (
@@ -223,4 +232,5 @@ const hasAssessmentData = computed(() => {
 			assessmentProgress.data.exercises.length > 0)
 	)
 })
+
 </script>
