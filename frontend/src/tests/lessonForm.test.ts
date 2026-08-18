@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { hasInstructorContent, hasEditorContent } from '@/utils/lessonForm'
+import {
+	hasInstructorContent,
+	hasEditorContent,
+	shouldSkipLessonSave,
+	toSingleLineTitle,
+} from '@/utils/lessonForm'
 
 // Regression guard: a transient/empty editor (hot-reload remount, render race,
 // mid lesson-switch) must NOT be allowed to overwrite a saved lesson. saveLesson
@@ -16,7 +21,7 @@ describe('hasEditorContent (anti-wipe guard)', () => {
 	})
 
 	it('is false for the exact wipe payload: one empty default paragraph', () => {
-		// This is what a freshly remounted EditorJS serialises to — the state that
+		// This is what a freshly remounted EditorJS serialises to: the state that
 		// reduced real lessons to "1 block / ~109 chars".
 		expect(
 			hasEditorContent({ blocks: [{ type: 'paragraph', data: { text: '' } }] })
@@ -87,5 +92,53 @@ describe('hasInstructorContent', () => {
 
 	it('returns false for malformed JSON', () => {
 		expect(hasInstructorContent('{not json', null)).toBe(false)
+	})
+})
+
+// A freshly created lesson opens with the title "Untitled lesson" and an empty
+// body; autosaving its title must work (content is optional). Only a fully
+// empty lesson is skipped, so autosave doesn't error on the required title.
+describe('shouldSkipLessonSave', () => {
+	it('saves a title-only lesson (empty body)', () => {
+		expect(shouldSkipLessonSave('My Lesson', false)).toBe(false)
+	})
+
+	it('saves when the body has content even if the title is blank', () => {
+		expect(shouldSkipLessonSave('', true)).toBe(false)
+		expect(shouldSkipLessonSave('   ', true)).toBe(false)
+	})
+
+	it('skips only when both title and body are empty', () => {
+		expect(shouldSkipLessonSave('', false)).toBe(true)
+		expect(shouldSkipLessonSave('   ', false)).toBe(true)
+		expect(shouldSkipLessonSave(null, false)).toBe(true)
+		expect(shouldSkipLessonSave(undefined, false)).toBe(true)
+	})
+})
+
+describe('toSingleLineTitle', () => {
+	it('collapses a line break into a single space', () => {
+		expect(toSingleLineTitle('Assignment\nsjksjla')).toBe('Assignment sjksjla')
+	})
+
+	it('collapses CRLF and runs of blank lines', () => {
+		expect(toSingleLineTitle('One\r\nTwo')).toBe('One Two')
+		expect(toSingleLineTitle('One\n\n\nTwo')).toBe('One Two')
+	})
+
+	it('does not leave double spaces around a break', () => {
+		expect(toSingleLineTitle('One \n Two')).toBe('One Two')
+	})
+
+	it('leaves a single-line title untouched', () => {
+		expect(toSingleLineTitle('A perfectly ordinary title')).toBe(
+			'A perfectly ordinary title'
+		)
+	})
+
+	it('returns an empty string for no title', () => {
+		expect(toSingleLineTitle('')).toBe('')
+		expect(toSingleLineTitle(null)).toBe('')
+		expect(toSingleLineTitle(undefined)).toBe('')
 	})
 })

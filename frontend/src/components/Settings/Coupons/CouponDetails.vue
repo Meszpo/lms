@@ -1,13 +1,10 @@
 <template>
 	<SettingsLayout
-		:title="isNew ? __('New Coupon') : __('Edit Coupon')"
-		:description="
-			__(
-				'Set the discount, validity, and the courses or batches this coupon applies to.'
-			)
-		"
+		:title="isNew ? __('New Coupon') : doc?.code || __('Coupon')"
 		:show-back="true"
+		:enabled="doc ? Boolean(doc.enabled) : undefined"
 		@back="emit('updateStep', 'list')"
+		@update:enabled="(value) => doc && (doc.enabled = value)"
 	>
 		<template #header-actions>
 			<Button variant="solid" :disabled="!doc" @click="saveCoupon()">
@@ -16,15 +13,7 @@
 		</template>
 
 		<div v-if="doc" class="space-y-4">
-			<div>
-				<Switch
-					size="sm"
-					v-model="doc.enabled"
-					:label="__('Enabled')"
-					:description="__('Allow this coupon to be used for discounts.')"
-				/>
-			</div>
-			<div class="grid grid-cols-2 gap-4">
+			<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
 				<FormControl
 					v-model="doc.code"
 					:label="__('Coupon Code')"
@@ -75,9 +64,9 @@
 				/>
 			</div>
 			<div class="pt-4">
-				<div class="font-semibold text-ink-gray-9 mb-3">
+				<h2 class="font-semibold text-ink-gray-9 mb-3">
 					{{ __('Applicable For') }}
-				</div>
+				</h2>
 				<CouponItems :items="doc.applicable_items" />
 			</div>
 		</div>
@@ -85,9 +74,8 @@
 </template>
 <script setup lang="ts">
 import { Button, FormControl, toast, createDocumentResource } from 'frappe-ui'
-import Switch from '@/components/Controls/Switch.vue'
 import { computed, reactive } from 'vue'
-import type { Coupon, Coupons } from './types'
+import type { Coupon, Coupons } from '@/types'
 import CouponItems from '@/components/Settings/Coupons/CouponItems.vue'
 import SettingsLayout from '@/components/Layouts/SettingsLayout.vue'
 import Select from '@/components/Controls/Select.vue'
@@ -101,13 +89,12 @@ const props = defineProps<{
 
 const isNew = !props.data?.name
 
-// New coupons are edited on a local object; existing ones are loaded as a full
-// document (child table + `modified`) so a single save persists everything and
-// the document resource keeps `modified` in sync across saves.
+// New coupons edit a local object; existing ones load as a full document (child
+// table + `modified`) so one save persists all of it and `modified` stays in sync.
 const localDoc = reactive<any>({
-	enabled: true,
-	discount_type: 'Percentage',
 	...props.data,
+	enabled: props.data?.enabled ?? true,
+	discount_type: props.data?.discount_type ?? 'Percentage',
 	applicable_items: props.data?.applicable_items?.length
 		? props.data.applicable_items
 		: [{ reference_doctype: 'LMS Course', reference_name: null }],
@@ -144,9 +131,9 @@ const saveCoupon = () => {
 
 	if (isNew) {
 		props.coupons.insert.submit(payload, {
-			onSuccess(data: Coupon) {
+			onSuccess(data: unknown) {
 				toast.success(__('Coupon created successfully'))
-				emit('updateStep', 'details', { ...data })
+				emit('updateStep', 'details', { ...(data as Coupon) })
 			},
 			...handlers,
 		})

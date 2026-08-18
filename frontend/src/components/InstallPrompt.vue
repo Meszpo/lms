@@ -1,7 +1,7 @@
 <template>
 	<Dialog v-model:open="showDialog">
 		<template #title>
-			<h2 class="text-xl-bold">{{ __('Install Frappe Learning') }}</h2>
+			<h2 class="text-lg-bold">{{ __('Install Frappe Learning') }}</h2>
 		</template>
 		<template #default>
 			<p>
@@ -20,25 +20,27 @@
 		</template>
 	</Dialog>
 
-	<Popover :show="iosInstallMessage" placement="top-start">
-		<template #body>
+	<Popover :open="iosInstallMessage" side="top" align="start" bare>
+		<template #default>
 			<div
 				class="fixed top-[20rem] translate-x-1/3 z-20 flex flex-col gap-3 rounded bg-surface-base py-5 drop-shadow-xl"
 			>
 				<div
 					class="mb-1 flex flex-row items-center justify-between px-3 text-center"
 				>
-					<span class="text-base-bold text-gray-900">
+					<span class="text-base-bold text-ink-gray-9">
 						{{ __('Install Frappe Learning') }}
 					</span>
 					<span class="inline-flex items-baseline">
-						<span
-							class="lucide-x ms-auto size-4 text-gray-700"
+						<button
+							type="button"
+							:aria-label="__('Close')"
+							class="lucide-x ms-auto size-4 text-ink-gray-7"
 							@click="iosInstallMessage = false"
 						/>
 					</span>
 				</div>
-				<div class="px-3 text-xs text-gray-800">
+				<div class="px-3 text-xs text-ink-gray-8">
 					<span class="flex flex-col gap-2">
 						<span class="leading-5">
 							{{

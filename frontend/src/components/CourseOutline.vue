@@ -9,12 +9,12 @@
 			}"
 		>
 			<div
-				class="text-xl-semibold leading-5 text-ink-gray-9"
+				class="text-lg-semibold leading-5 text-ink-gray-9"
 				:class="{ 'font-medium text-p-base': allowEdit }"
 			>
 				{{ __(title) }}
 			</div>
-			<Button size="sm" v-if="allowEdit" @click="openChapterModal()">
+			<Button size="sm" v-if="allowEdit" @click="openChapterForm()">
 				<template #prefix>
 					<span class="lucide-plus size-4" />
 				</template>
@@ -27,7 +27,7 @@
 		>
 			<span class="lucide-book-open size-8" />
 			<div class="text-sm">{{ __('No chapters yet') }}</div>
-			<Button @click="openChapterModal()">
+			<Button @click="openChapterForm()">
 				<template #prefix>
 					<span class="lucide-plus size-4" />
 				</template>
@@ -42,7 +42,7 @@
 		>
 			<Draggable
 				:list="outline.data"
-				:disabled="!allowEdit"
+				:disabled="!allowEdit || chapterRenaming"
 				item-key="name"
 				group="chapters"
 				@end="updateChapterOrder"
@@ -57,55 +57,35 @@
 							:inlineSelect="inlineSelect"
 							:editorLinks="editorLinks"
 							:selectedLessonNumber="selectedLessonNumber"
+							:creatingLesson="creatingLessonChapter === chapter.name"
 							@select-lesson="(payload) => emit('select-lesson', payload)"
-							@edit-chapter="openChapterModal"
+							@edit-chapter="openChapterForm"
+							@rename-chapter="renameChapter"
+							@renaming-change="(v) => (chapterRenaming = v)"
 							@delete-chapter="trashChapter"
 							@delete-lesson="
 								({ lesson, chapter: chapterName }) =>
 									trashLesson(lesson, chapterName)
 							"
 							@move-lesson="updateOutline"
-							@add-lesson="openLessonModalForAdd"
+							@create-lesson="createLessonInline"
 						/>
 					</div>
 				</template>
 			</Draggable>
 		</div>
 	</div>
-	<ChapterModal
-		v-if="user.data"
-		v-model="showChapterModal"
-		:course="courseName"
-		:chapterDetail="currentChapter"
-		@created="outline.reload()"
-		@updated="outline.reload()"
-	/>
-	<LessonModal
-		v-if="user.data && lessonContext"
-		v-model:show="showLessonModal"
-		:course="courseName"
-		:chapterName="lessonContext.chapterName"
-		:lessonIdx="lessonContext.lessonIdx"
-		:lessonDetail="lessonContext.lessonDetail"
-		@created="onLessonCreated"
-	/>
 </template>
 
 <script setup lang="ts">
 import { Button, createResource, toast } from 'frappe-ui'
-import { inject, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import Draggable from 'vuedraggable'
 
-import ChapterModal from '@/components/Modals/ChapterModal.vue'
-import LessonModal from '@/components/Modals/LessonModal.vue'
 import ChapterRow from '@/components/ChapterRow.vue'
-import type {
-	OutlineChapter,
-	OutlineLesson,
-	Resource,
-	SessionUser,
-} from '@/types/api'
+import { openFormRoute } from '@/composables/useFormRoute'
+import type { OutlineChapter, OutlineLesson, Resource } from '@/types'
 
 interface DraggableEvent {
 	item: { __draggable_context: { element: OutlineChapter | OutlineLesson } }
@@ -127,10 +107,10 @@ type DialogFn = (opts: {
 }) => void
 
 import { getCurrentInstance } from 'vue'
-const user = inject<SessionUser>('$user')!
 const router = useRouter()
-const showChapterModal = ref<boolean>(false)
-const currentChapter = ref<OutlineChapter | null>(null)
+const route = useRoute()
+// True while a ChapterRow is in inline-rename mode; locks chapter drag.
+const chapterRenaming = ref<boolean>(false)
 const { $dialog } = getCurrentInstance()!.appContext.config
 	.globalProperties as {
 	$dialog: DialogFn
@@ -138,57 +118,16 @@ const { $dialog } = getCurrentInstance()!.appContext.config
 
 const emit = defineEmits<{
 	'select-lesson': [{ chapterNumber: string; lessonNumber: string }]
+	// Keyed delete signals so the parent can match the open lesson precisely. The
+	// name is carried per emit (no shared slot), so concurrent deletes can't name
+	// the wrong doc and an unrelated reload can't consume the signal.
+	'lesson-deleted': [{ lesson: string }]
+	'chapter-deleted': [{ chapter: string }]
 }>()
 
-interface LessonModalContext {
-	chapterName: string
-	chapterIdx: number
-	lessonIdx: number
-	lessonDetail: {
-		name?: string
-		title?: string
-		include_in_preview?: boolean | 0 | 1
-	} | null
-}
-
-const showLessonModal = ref<boolean>(false)
-const lessonContext = ref<LessonModalContext | null>(null)
-
-function openLessonModalForAdd(payload: {
-	chapter: OutlineChapter
-	lessonIdx: number
-}) {
-	lessonContext.value = {
-		chapterName: payload.chapter.name,
-		chapterIdx: payload.chapter.idx,
-		lessonIdx: payload.lessonIdx,
-		lessonDetail: null,
-	}
-	showLessonModal.value = true
-}
-
-function onLessonCreated(created: { name: string; number: string }) {
-	outline.reload()
-	const ctx = lessonContext.value
-	if (!ctx) return
-	const chapterNumber = String(ctx.chapterIdx)
-	const lessonNumber = created.number
-	if (props.inlineSelect) {
-		emit('select-lesson', { chapterNumber, lessonNumber })
-		return
-	}
-	if (props.editorLinks) {
-		router.push({
-			name: 'CourseDetail',
-			params: { courseName: props.courseName },
-			hash: '#course editor',
-			query: {
-				editLesson: `${chapterNumber}-${lessonNumber}`,
-				lessonMode: 'edit',
-			},
-		})
-	}
-}
+// The lesson currently being named inline (its docname), and the chapter whose
+// "Add Lesson" button is mid-create (for the button spinner).
+const creatingLessonChapter = ref<string>('')
 
 const props = withDefaults(
 	defineProps<{
@@ -216,7 +155,7 @@ const props = withDefaults(
 	}
 )
 
-defineExpose({ openChapterModal })
+defineExpose({ openChapterForm })
 
 const outline = createResource({
 	url: 'lms.lms.utils.get_course_outline',
@@ -254,6 +193,11 @@ const deleteLesson = createResource({
 	onSuccess() {
 		outline.reload()
 		toast.success(__('Lesson deleted successfully'))
+	},
+	onError(err: { messages?: string[] } | string) {
+		toast.error(
+			typeof err === 'string' ? err : err.messages?.[0] ?? __('Error')
+		)
 	},
 })
 
@@ -293,7 +237,93 @@ const deleteChapter = createResource({
 		outline.reload()
 		toast.success(__('Chapter deleted successfully'))
 	},
+	onError(err: { messages?: string[] } | string) {
+		toast.error(
+			typeof err === 'string' ? err : err.messages?.[0] ?? __('Error')
+		)
+	},
 })
+
+const renameChapterResource = createResource({
+	url: 'lms.lms.api.upsert_chapter',
+	makeParams(values: { chapter: OutlineChapter; title: string }) {
+		return {
+			name: values.chapter.name,
+			title: values.title,
+			course: props.courseName,
+			is_scorm_package: values.chapter.is_scorm_package ?? 0,
+			scorm_package: values.chapter.scorm_package ?? null,
+		}
+	},
+	onSuccess() {
+		outline.reload()
+		toast.success(__('Chapter renamed successfully'))
+	},
+	onError(err: { messages?: string[] } | string) {
+		outline.reload()
+		toast.error(typeof err === 'string' ? err : err.messages?.[0] ?? 'Error')
+	},
+})
+
+function renameChapter(payload: { chapter: OutlineChapter; title: string }) {
+	renameChapterResource.submit(payload)
+}
+
+const errorMessage = (err: { messages?: string[] } | string): string =>
+	typeof err === 'string' ? err : err.messages?.[0] ?? 'Error'
+
+// Inserts the Course Lesson and its chapter reference in one request, so a
+// failure on either rolls back atomically: no orphaned lesson. Returns the
+// new lesson's docname.
+const addLesson = createResource({
+	url: 'lms.lms.api.create_lesson',
+	makeParams(values: { chapter: string }) {
+		return { chapter: values.chapter }
+	},
+})
+
+// Create the lesson immediately as "Untitled lesson", then open it in the
+// editor so the title is edited inline on the lesson itself.
+function createLessonInline(payload: {
+	chapter: OutlineChapter
+	lessonIdx: number
+}) {
+	creatingLessonChapter.value = payload.chapter.name
+	addLesson.submit(
+		{ chapter: payload.chapter.name },
+		{
+			onSuccess(lessonName: string) {
+				creatingLessonChapter.value = ''
+				outline.reload().then(() => {
+					const created = (outline.data ?? [])
+						.flatMap((c) => c.lessons ?? [])
+						.find((l) => l.name === lessonName)
+					if (created) navigateToLesson(created)
+				})
+			},
+			onError(err: { messages?: string[] } | string) {
+				creatingLessonChapter.value = ''
+				toast.error(errorMessage(err))
+			},
+		}
+	)
+}
+
+function navigateToLesson(lesson: OutlineLesson) {
+	const [chapterNumber, lessonNumber] = lesson.number.split('-')
+	if (props.inlineSelect) {
+		emit('select-lesson', { chapterNumber, lessonNumber })
+		return
+	}
+	if (props.editorLinks) {
+		router.push({
+			name: 'CourseDetail',
+			params: { courseName: props.courseName },
+			hash: '#editor',
+			query: { editLesson: lesson.number },
+		})
+	}
+}
 
 function trashLesson(lessonName: string, chapterName: string) {
 	$dialog({
@@ -307,7 +337,13 @@ function trashLesson(lessonName: string, chapterName: string) {
 				theme: 'red',
 				variant: 'solid',
 				onClick(close) {
-					deleteLesson.submit({ lesson: lessonName, chapter: chapterName })
+					// Per-call onSuccess closes over this lessonName, so the editor is
+					// told exactly which lesson went: no shared slot to drift on
+					// concurrent deletes. Runs alongside the resource-level reload.
+					deleteLesson.submit(
+						{ lesson: lessonName, chapter: chapterName },
+						{ onSuccess: () => emit('lesson-deleted', { lesson: lessonName }) }
+					)
 					close()
 				},
 			},
@@ -327,7 +363,13 @@ function trashChapter(chapterName: string) {
 				theme: 'red',
 				variant: 'solid',
 				onClick(close) {
-					deleteChapter.submit({ chapter: chapterName })
+					deleteChapter.submit(
+						{ chapter: chapterName },
+						{
+							onSuccess: () =>
+								emit('chapter-deleted', { chapter: chapterName }),
+						}
+					)
 					close()
 				},
 			},
@@ -335,9 +377,23 @@ function trashChapter(chapterName: string) {
 	})
 }
 
-function openChapterModal(chapter: OutlineChapter | null = null) {
-	currentChapter.value = chapter
-	showChapterModal.value = true
+// openFormRoute, not a bare router.push: it stamps the history entry so the
+// form's own back/Escape pops that one entry instead of replacing to the parent
+// and leaving a duplicate behind.
+//
+// route.hash and route.query travel with it because CourseDetail reads its
+// active tab off the hash and CourseEditor reads the open lesson off the query
+// (design doc C2). Dropping either would reset the page behind the open form.
+function openChapterForm(chapter: OutlineChapter | null = null) {
+	openFormRoute(router, {
+		name: 'ChapterForm',
+		params: {
+			courseName: props.courseName,
+			chapterName: chapter?.name ?? 'new',
+		},
+		hash: route.hash,
+		query: { ...route.query },
+	})
 }
 
 function updateOutline(e: DraggableEvent) {

@@ -1,12 +1,11 @@
 <template>
 	<div class="border-2 rounded-md min-w-80 max-w-sm">
-		<iframe
-			v-if="course.data?.video_link"
-			:src="video_link"
-			class="rounded-t-md min-h-56 w-full"
+		<VideoPreview
+			:video-link="course.data?.video_link"
+			:fallback-image="course.data?.image"
 		/>
 		<div class="p-5">
-			<div class="text-4xl-semibold text-ink-gray-9 mb-4">
+			<div class="text-3xl-semibold text-ink-gray-9 mb-4">
 				{{ priceLabel }}
 			</div>
 			<div v-if="!readOnlyMode">
@@ -46,7 +45,11 @@
 						},
 					}"
 				>
-					<Button variant="solid" size="md" class="w-full mb-8">
+					<Button
+						variant="solid"
+						size="md"
+						class="w-full mb-8 text-p-base-medium"
+					>
 						<template #prefix>
 							<span class="lucide-credit-card size-4" />
 						</template>
@@ -148,13 +151,15 @@ import { computed, inject } from 'vue'
 import { Badge, Button, call, createResource, toast } from 'frappe-ui'
 import { useRouter } from 'vue-router'
 import CertificationLinks from '@/components/CertificationLinks.vue'
+import VideoPreview from '@/components/VideoPreview.vue'
 import { useTelemetry } from 'frappe-ui/frappe'
+import { openExternal } from '@/utils/openExternal'
 import type {
 	CourseDetails,
 	CourseInstructorInfo,
 	Resource,
 	SessionUser,
-} from '@/types/api'
+} from '@/types'
 
 const router = useRouter()
 const user = inject<SessionUser>('$user')!
@@ -168,11 +173,6 @@ const props = withDefaults(
 	}>(),
 	{}
 )
-
-const video_link = computed<string | undefined>(() => {
-	const link = props.course.data?.video_link
-	return link ? 'https://www.youtube.com/embed/' + link : undefined
-})
 
 function enrollStudent() {
 	if (!user.data) {
@@ -260,11 +260,10 @@ const certificate = createResource({
 		}
 	},
 	onSuccess(data: { name: string; template: string }) {
-		window.open(
+		openExternal(
 			`/api/method/frappe.utils.print_format.download_pdf?doctype=LMS+Certificate&name=${
 				data.name
-			}&format=${encodeURIComponent(data.template)}`,
-			'_blank'
+			}&format=${encodeURIComponent(data.template)}`
 		)
 	},
 }) as Resource<{ name: string; template: string } | null>

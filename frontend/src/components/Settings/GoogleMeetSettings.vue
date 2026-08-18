@@ -1,134 +1,48 @@
 <template>
-	<template v-if="view === 'list'">
-		<SettingsLayout :title="label" :description="__(description)">
-			<template #header-actions>
-				<Button variant="solid" @click="openForm('new')">
-					<template #prefix>
-						<span class="lucide-plus h-4 w-4" />
-					</template>
-					{{ __('New') }}
-				</Button>
-			</template>
-			<div v-if="googleMeetAccounts.data?.length">
-				<ListView
-					:columns="columns"
-					:rows="googleMeetAccounts.data"
-					row-key="name"
-					:options="{
-						showTooltip: false,
-						onRowClick: (row) => {
-							openForm(row.name)
-						},
-					}"
-				>
-					<ListHeader
-						class="mb-2 grid items-center gap-x-4 rounded bg-surface-gray-2 p-2"
-					>
-						<ListHeaderItem :item="item" v-for="item in columns">
-							<template #prefix="{ item }">
-								<FeatherIcon
-									v-if="item.icon"
-									:name="item.icon"
-									class="h-4 w-4 stroke-1.5"
-								/>
-							</template>
-						</ListHeaderItem>
-					</ListHeader>
-
-					<ListRows>
-						<ListRow :row="row" v-for="row in googleMeetAccounts.data">
-							<template #default="{ column, item }">
-								<ListRowItem :item="row[column.key]" :align="column.align">
-									<template #prefix>
-										<div v-if="column.key == 'member_name'">
-											<Avatar
-												class="flex items-center"
-												:image="row['member_image']"
-												:label="item"
-												size="sm"
-											/>
-										</div>
-									</template>
-									<div v-if="column.key == 'enabled'">
-										<Badge v-if="row[column.key]" theme="green">
-											{{ __('Enabled') }}
-										</Badge>
-										<Badge v-else theme="gray">
-											{{ __('Disabled') }}
-										</Badge>
-									</div>
-									<div v-else class="leading-5 text-sm">
-										{{ row[column.key] }}
-									</div>
-								</ListRowItem>
-							</template>
-						</ListRow>
-					</ListRows>
-
-					<ListSelectBanner>
-						<template #actions="{ unselectAll, selections }">
-							<div class="flex gap-2">
-								<Button
-									variant="ghost"
-									@click="removeAccount(selections, unselectAll)"
-								>
-									<span class="lucide-trash-2 h-4 w-4" />
-								</Button>
-							</div>
-						</template>
-					</ListSelectBanner>
-				</ListView>
-			</div>
-			<EmptyStateLayout
-				v-else
-				name="Google Meet Settings"
-				:description="__('Add one to get started.')"
-				icon="lucide-presentation"
-				width="lg"
-			/>
-		</SettingsLayout>
-	</template>
+	<SettingsList
+		v-if="view === 'list'"
+		:title="label || ''"
+		:description="__(description || '')"
+		:columns="columns"
+		:rows="list.rows"
+		:loading="list.loading"
+		:has-next-page="list.hasNextPage"
+		v-model:search="list.search"
+		searchable
+		:search-label="__('Search accounts')"
+		empty-name="Google Meet Settings"
+		empty-icon="lucide-presentation"
+		@new="openForm('new')"
+		@load-more="list.loadMore()"
+		@row-click="(row) => openForm(row.name)"
+	/>
 	<GoogleMeetAccountForm
 		v-else
 		:accountID="currentAccount"
-		v-model:googleMeetAccounts="googleMeetAccounts"
+		v-model:googleMeetAccounts="list.resource"
 		@updateStep="(step) => (view = step)"
 	/>
 </template>
 <script setup lang="ts">
-import {
-	Avatar,
-	Button,
-	Badge,
-	call,
-	createListResource,
-	FeatherIcon,
-	ListView,
-	ListHeader,
-	ListHeaderItem,
-	ListRows,
-	ListRow,
-	ListRowItem,
-	ListSelectBanner,
-	toast,
-} from 'frappe-ui'
-import { computed, inject, onMounted, ref } from 'vue'
+import { toast } from 'frappe-ui'
+import { inject, onMounted, ref } from 'vue'
 import { cleanError } from '@/utils'
-import { User } from '@/components/Settings/types'
+import { User } from '@/types'
 import GoogleMeetAccountForm from '@/components/Settings/GoogleMeetAccountForm.vue'
-import EmptyStateLayout from '@/components/Layouts/EmptyStateLayout.vue'
-import SettingsLayout from '@/components/Layouts/SettingsLayout.vue'
+import SettingsList from '@/components/Layouts/SettingsList.vue'
+import { useSettingsListResource } from '@/composables/useSettingsListResource'
+import type { SettingsListColumn } from '@/types'
 
 const user = inject<User | null>('$user')
 const view = ref<'list' | 'form'>('list')
 const currentAccount = ref<string | null>(null)
 
-const props = defineProps({
+defineProps({
 	label: String,
 	description: String,
 })
 
-const googleMeetAccounts = createListResource({
+const list = useSettingsListResource({
 	doctype: 'LMS Google Meet Settings',
 	fields: [
 		'name',
@@ -138,66 +52,68 @@ const googleMeetAccounts = createListResource({
 		'member_image',
 		'google_calendar',
 	],
+	searchFields: ['member_name', 'google_calendar'],
 	cache: ['googleMeetAccounts'],
-})
-
-onMounted(() => {
-	fetchGoogleMeetAccounts()
+	auto: false,
 })
 
 const fetchGoogleMeetAccounts = () => {
 	if (!user?.data?.is_moderator && !user?.data?.is_evaluator) return
 
 	if (!user?.data?.is_moderator) {
-		googleMeetAccounts.update({
-			filters: {
-				member: user.data.name,
-			},
-		})
+		list.resource.update({ filters: { member: user.data.name } })
 	}
-	googleMeetAccounts.reload()
+	list.reload()
 }
+
+onMounted(() => {
+	fetchGoogleMeetAccounts()
+})
+
+const removeAccount = (accountID: string) => {
+	list.remove(accountID, {
+		onSuccess: () =>
+			toast.success(__('Google Meet account deleted successfully')),
+		onError: (err) => toast.error(cleanError(err.messages?.[0])),
+	})
+}
+
+const columns: SettingsListColumn[] = [
+	{
+		key: 'account',
+		label: __('Account'),
+		type: 'stacked',
+		primary: (row) => row.member_name,
+		secondary: (row) => row.google_calendar,
+		avatar: (row) => ({ image: row.member_image, label: row.member_name }),
+	},
+	{
+		key: 'status',
+		label: __('Status'),
+		type: 'badge',
+		width: '6.5rem',
+		badges: (row) => [
+			row.enabled
+				? { label: __('Enabled'), theme: 'green' }
+				: { label: __('Disabled'), theme: 'gray' },
+		],
+	},
+	{
+		key: 'actions',
+		type: 'actions',
+		ariaLabel: (row) => __('Actions for {0}').format(row.member_name),
+		options: (row) => [
+			{
+				label: __('Delete'),
+				icon: 'lucide-trash-2',
+				onClick: () => removeAccount(row.name),
+			},
+		],
+	},
+]
 
 const openForm = (accountID: string) => {
 	currentAccount.value = accountID
 	view.value = 'form'
 }
-
-const removeAccount = (selections, unselectAll) => {
-	call('lms.lms.api.delete_documents', {
-		doctype: 'LMS Google Meet Settings',
-		documents: Array.from(selections),
-	})
-		.then(() => {
-			googleMeetAccounts.reload()
-			toast.success(__('Google Meet Account deleted successfully'))
-			unselectAll()
-		})
-		.catch((err) => {
-			toast.error(
-				cleanError(err.messages[0]) || __('Error deleting Google Meet Account')
-			)
-		})
-}
-
-const columns = computed(() => {
-	return [
-		{
-			label: __('Member'),
-			key: 'member_name',
-			icon: 'user',
-		},
-		{
-			label: __('Account Name'),
-			key: 'name',
-			icon: 'video',
-		},
-		{
-			label: __('Status'),
-			key: 'enabled',
-			align: 'center',
-			icon: 'check-square',
-		},
-	]
-})
 </script>

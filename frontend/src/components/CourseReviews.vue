@@ -2,11 +2,11 @@
 	<div v-if="reviews.data?.length || membership" class="mt-12">
 		<div class="flex items-center justify-between gap-3 mb-8">
 			<div class="flex items-center gap-2">
-				<span class="lucide-star size-5 text-yellow-500 fill-yellow-500" />
-				<span class="text-4xl-semibold text-ink-gray-9">
+				<LucideStar class="size-5 text-transparent fill-yellow-500" />
+				<span class="text-3xl-semibold text-ink-gray-9">
 					{{ avg_rating ? formatRating(avg_rating) : '0' }}
 				</span>
-				<span class="text-xl text-ink-gray-7">
+				<span class="text-lg text-ink-gray-7">
 					{{ __('course rating') }} &amp;
 					{{ reviews.data?.length || 0 }}
 					{{
@@ -16,7 +16,11 @@
 					}}
 				</span>
 			</div>
-			<Button v-if="membership && !hasReviewed.data" @click="openReviewModal()">
+			<Button
+				v-if="membership && !hasReviewed.data"
+				class="text-p-base-medium"
+				@click="openReviewModal()"
+			>
 				{{ __('Write a Review') }}
 			</Button>
 		</div>
@@ -46,7 +50,7 @@
 								name: 'Profile',
 								params: { username: review.owner_details.username },
 							}"
-							class="text-xl-medium text-ink-gray-9 truncate"
+							class="text-lg-medium text-ink-gray-9 truncate"
 						>
 							{{ review.owner_details.full_name }}
 						</router-link>
@@ -55,10 +59,10 @@
 						</span>
 					</div>
 					<div class="flex gap-1 mt-2">
-						<span
+						<LucideStar
 							v-for="i in 5"
 							:key="i"
-							class="lucide-star size-4 text-transparent"
+							class="size-4 text-transparent"
 							:class="
 								i <= Math.ceil(review.rating)
 									? 'fill-yellow-500'
@@ -85,7 +89,11 @@
 		</div>
 
 		<div v-if="canShowMore" class="mt-8">
-			<Button class="w-full" size="md" @click="showAll = true">
+			<Button
+				class="w-full text-p-base-medium"
+				size="md"
+				@click="showAll = true"
+			>
 				{{ __('View all reviews') }}
 			</Button>
 		</div>
@@ -110,7 +118,7 @@ import type {
 	Membership,
 	Resource,
 	SessionUser,
-} from '@/types/api'
+} from '@/types'
 
 const user = inject<SessionUser>('$user')!
 const dayjs = inject<typeof dayjsType>('$dayjs')!
@@ -156,7 +164,7 @@ const showAll = ref(false)
 const expanded = reactive<Record<string, boolean>>({})
 
 const visibleReviews = computed(() => {
-	// Drop reviews whose author record is missing — owner_details can come
+	// Drop reviews whose author record is missing: owner_details can come
 	// back null for guest-authored or deleted-user reviews, and the row
 	// markup dereferences it for the avatar / profile link.
 	const all = (reviews.data || []).filter((r) => r.owner_details)

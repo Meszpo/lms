@@ -1,11 +1,13 @@
 <template>
 	<div class="">
-		<header
-			class="sticky top-0 z-10 flex items-center justify-between border-b bg-surface-base px-3 py-2.5 sm:px-5"
+		<PageHeader :breadcrumbs="breadcrumbs" />
+		<div
+			v-if="chartDetails.loading && !chartDetails.data"
+			class="flex flex-1 items-center justify-center p-5"
 		>
-			<Breadcrumbs class="h-7" :items="breadcrumbs" />
-		</header>
-		<div v-if="chartDetails.data" class="p-5">
+			<LoadingIndicator class="size-5 text-ink-gray-5" />
+		</div>
+		<div v-else-if="chartDetails.data" class="p-5">
 			<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
 				<Tooltip :text="__('Published Courses')">
 					<NumberChart
@@ -135,14 +137,15 @@
 <script setup>
 import {
 	AxisChart,
-	Breadcrumbs,
 	createResource,
 	DonutChart,
+	LoadingIndicator,
 	NumberChart,
 	Tooltip,
 	usePageMeta,
 } from 'frappe-ui'
 import { computed } from 'vue'
+import PageHeader from '@/components/Layouts/PageHeader.vue'
 import { sessionStore } from '../stores/session'
 
 const { brand } = sessionStore()
@@ -220,7 +223,7 @@ const courseCompletion = createResource({
 	cache: ['courseCompletion'],
 })
 
-// A donut with zero completions conveys nothing — hide it until at least one
+// A donut with zero completions conveys nothing, so hide it until at least one
 // learner has completed a course.
 const hasCompletions = computed(() => {
 	const completed = courseCompletion.data?.find((d) => d.label === 'Completed')

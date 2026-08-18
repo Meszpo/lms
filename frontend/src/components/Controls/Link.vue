@@ -1,19 +1,19 @@
 <template>
-	<div>
-		<FormLabel
-			v-if="attrs.label"
-			:label="attrs.label"
-			:required="attrs.required"
-			class="mb-1.5"
-		/>
+	<div :class="attrs.class as any" :style="attrs.style as any">
 		<Combobox
+			:open="isOpen"
 			:modelValue="value"
 			:options="resolvedOptions"
 			:placeholder="attrs.placeholder as string"
 			:disabled="attrs.readonly as boolean"
 			:size="(attrs.size as ComboboxSize) || 'sm'"
+			:aria-label="label ? undefined : (attrs['aria-label'] as string)"
 			:variant="attrs.variant as ComboboxVariant"
 			:loading="options.loading"
+			:label="label ? __(label) : undefined"
+			:required="required"
+			:description="description"
+			:error="error"
 			@update:modelValue="onSelect"
 			@update:query="onQuery"
 			@update:open="onOpen"
@@ -49,7 +49,7 @@
 							{{ __('Create') }}
 						</Button>
 					</div>
-					<div v-else class="flex justify-between">
+					<div v-else class="flex flex-wrap justify-between gap-2">
 						<Button
 							variant="ghost"
 							size="sm"
@@ -78,17 +78,12 @@
 </template>
 
 <script setup lang="ts">
-import {
-	Combobox,
-	Button,
-	FormControl,
-	FormLabel,
-	createResource,
-} from 'frappe-ui'
+import { Combobox, Button, FormControl, createResource } from 'frappe-ui'
+import type { ComboboxOptionValue } from 'frappe-ui'
 import { useDebounceFn, watchDebounced } from '@vueuse/core'
 import { useAttrs, computed, ref, watch } from 'vue'
 import { useSettings } from '@/stores/settings'
-import type { Resource } from '@/types/api'
+import type { Resource } from '@/types'
 
 type ComboboxSize = 'sm' | 'md' | 'lg' | 'xl'
 type ComboboxVariant = 'subtle' | 'outline' | 'ghost'
@@ -106,7 +101,10 @@ const props = withDefaults(
 		doctype: string
 		filters?: Record<string, unknown>
 		modelValue?: string
+		label?: string
 		description?: string
+		error?: string
+		required?: boolean
 		inlineCreate?: boolean
 		inlineCreatePlaceholder?: string
 		onCreate?: CreateHandler
@@ -119,11 +117,14 @@ const emit = defineEmits<{
 	(e: 'change', value: string): void
 }>()
 
+defineOptions({ inheritAttrs: false })
+
 const attrs = useAttrs()
 const valuePropPassed = computed<boolean>(() => 'value' in attrs)
 
 const creating = ref<boolean>(false)
 const newItemName = ref<string>('')
+const isOpen = ref<boolean>(false)
 let loaded = false
 
 const value = computed<string>(() =>
@@ -207,14 +208,15 @@ function reload(txt: string = ''): void {
 	options.reload()
 }
 
-function onOpen(open: boolean): void {
-	if (open && !loaded) reload('')
+function onOpen(open: unknown): void {
+	isOpen.value = open as boolean
+	if (isOpen.value && !loaded) reload('')
 }
 
-const onQuery = useDebounceFn((txt: string) => reload(txt), 300)
+const onQuery = useDebounceFn((txt: unknown) => reload(txt as string), 300)
 
 // Settings drawer (UserDropdown) is where users add Categories, Course
-// Evaluators, etc. — refresh options once it closes so newly-created
+// Evaluators, etc. Refresh options once it closes so newly-created
 // linked records show up without a full reload.
 const settingsStore = useSettings()
 watchDebounced(
@@ -225,8 +227,12 @@ watchDebounced(
 	{ debounce: 200 }
 )
 
-function onSelect(val: string | null): void {
-	emit(valuePropPassed.value ? 'change' : 'update:modelValue', val ?? '')
+function onSelect(val: unknown): void {
+	const selected = val as ComboboxOptionValue | null
+	emit(
+		valuePropPassed.value ? 'change' : 'update:modelValue',
+		selected == null ? '' : String(selected)
+	)
 }
 
 function clearValue(): void {
@@ -238,6 +244,8 @@ function handleCreate(): void {
 		creating.value = true
 		return
 	}
+	// Close the dropdown so it doesn't stack on top of the modal onCreate opens.
+	isOpen.value = false
 	props.onCreate?.(null)
 }
 
@@ -253,3 +261,30 @@ function submitCreate(): void {
 
 defineExpose({ reload })
 </script>
+
+<style scoped>
+/*
+ * frappe-ui's Combobox trigger carries `focus-within:focus-ring` /
+ * `data-[state=open]:focus-ring` UNCONDITIONALLY (triggerBaseClassesFocusWithin
+ * in node_modules/frappe-ui/src/components/shared/selection/utils.ts:75-76;
+ * Link never sets a button trigger or #trigger slot, so this always applies),
+ * which paints an outline ring on focus/open. This project's field convention
+ * is border+shadow with NO ring on fields. `focus-visible:ring` is reserved
+ * for buttons/nav (see frappe-ui-beta7-field-focus-states). These rules exist
+ * to CANCEL frappe-ui's ring and restore that field convention on the
+ * trigger. They are NOT redundant with frappe-ui's own styling, so do not
+ * delete them thinking they duplicate it.
+ *
+ * Written as a scoped :deep() selector on [data-slot="trigger"], not as a
+ * plain `class` on <Combobox>, because Combobox routes a caller's `class` to
+ * its LabelingWrapper (not the trigger) once a label is present. See
+ * `hasLabeling` in node_modules/frappe-ui/src/components/Combobox/Combobox.vue.
+ * Nearly every <Link> caller passes a label, so a plain class here would
+ * silently stop reaching the trigger. Targeting the data-slot instead makes
+ * it independent of that labeled/unlabeled routing.
+ */
+:deep([data-slot='trigger']:focus-within),
+:deep([data-slot='trigger'][data-state='open']) {
+	@apply border-outline-gray-4 bg-surface-base shadow-sm outline-none;
+}
+</style>

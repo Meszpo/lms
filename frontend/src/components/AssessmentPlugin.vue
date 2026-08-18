@@ -48,7 +48,7 @@
 							:label="__('Select an Assignment')"
 							:onCreate="(value, close) => redirectToForm()"
 						/>
-						<Switch
+						<BooleanSwitch
 							size="sm"
 							:description="__('Only show assignments from the current course')"
 							:label="__('Filter assignments by course')"
@@ -62,11 +62,12 @@
 </template>
 <script setup>
 import { Dialog } from 'frappe-ui'
-import Switch from '@/components/Controls/Switch.vue'
+import BooleanSwitch from '@/components/Controls/BooleanSwitch.vue'
 import { nextTick, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { getLmsRoute } from '@/utils/basePath'
 import Link from '@/components/Controls/Link.vue'
+import { openExternal } from '@/utils/openExternal'
 
 const show = ref(false)
 const quiz = ref(null)
@@ -97,9 +98,9 @@ const addAssessment = () => {
 
 const redirectToForm = () => {
 	if (props.type == 'quiz') {
-		window.open(getLmsRoute('quizzes?new=true'), '_blank')
+		openExternal(getLmsRoute('quizzes?new=true'))
 	} else {
-		window.open(getLmsRoute('assignments?new=true'), '_blank')
+		openExternal(getLmsRoute('assignments/new'))
 	}
 }
 </script>

@@ -12,7 +12,7 @@
 				<div v-for="link in sidebarLinks" class="mx-2 my-2.5">
 					<div
 						v-if="!link.hideLabel"
-						class="mb-2 mt-3 flex cursor-pointer gap-1.5 px-1 text-base-medium text-ink-gray-5 transition-all duration-300 ease-in-out"
+						class="mb-2 mt-3 flex cursor-pointer gap-1.5 px-1 text-p-base-medium text-ink-gray-5 transition-all duration-300 ease-in-out"
 					>
 						<span>{{ __(link.label) }}</span>
 					</div>
@@ -85,7 +85,7 @@
 		<div class="m-2 flex flex-col gap-1">
 			<div
 				v-if="readOnlyMode && !sidebarStore.isSidebarCollapsed"
-				class="z-10 m-2 bg-surface-elevation-2 py-2.5 px-3 text-xs text-ink-gray-7 leading-5 rounded-md"
+				class="z-10 m-2 bg-surface-elevation-2 py-2.5 px-3 text-p-xs text-ink-gray-7 rounded-md"
 			>
 				{{
 					__(
@@ -106,7 +106,7 @@
 							{{ __('Complete your profile') }}
 						</div>
 					</div>
-					<div class="text-ink-gray-7 leading-5">
+					<div class="text-ink-gray-7">
 						{{ __('Highlight what makes you unique and show your skills.') }}
 					</div>
 				</div>
@@ -256,13 +256,13 @@
 <script setup>
 import { getSidebarLinks } from '@/utils'
 import { usersStore } from '@/stores/user'
-import { sessionStore } from '@/stores/session'
 import { useSidebar } from '@/stores/sidebar'
 import { useSettings } from '@/stores/settings'
-import { Button, call, createResource, Tooltip, toast } from 'frappe-ui'
+import { Button, call, Tooltip, toast } from 'frappe-ui'
 import PageModal from '@/components/Modals/PageModal.vue'
 import LMSLogo from '@/components/Icons/LMSLogo.vue'
 import { useRouter } from 'vue-router'
+import { openFormRoute } from '@/composables/useFormRoute'
 import {
 	ref,
 	onMounted,
@@ -298,19 +298,29 @@ import UserDropdown from '@/components/Sidebar/UserDropdown.vue'
 import CollapseSidebar from '@/components/Icons/CollapseSidebar.vue'
 import SidebarLink from '@/components/Sidebar/SidebarLink.vue'
 import CommandPalette from '@/components/CommandPalette/CommandPalette.vue'
+import { openExternal } from '@/utils/openExternal'
+import {
+	loadUnreadCount,
+	unreadCount,
+	unreadNotifications,
+} from '@/stores/notifications'
 
-const { user } = sessionStore()
 const { userResource } = usersStore()
 let sidebarStore = useSidebar()
 const socket = inject('$socket')
-const unreadCount = ref(0)
 const sidebarLinks = ref(null)
 const { capture } = useTelemetry()
 const showPageModal = ref(false)
 const isModerator = ref(false)
 const isInstructor = ref(false)
 const pageToEdit = ref(null)
-const { sidebarSettings, activeTab, isSettingsOpen, programs } = useSettings()
+const {
+	sidebarSettings,
+	activeTab,
+	isSettingsOpen,
+	programs,
+	loadSidebarSettings,
+} = useSettings()
 const settingsStore = useSettings()
 const showOnboarding = ref(false)
 const showIntermediateModal = ref(false)
@@ -330,28 +340,30 @@ onMounted(() => {
 	setUpOnboarding()
 	addKeyboardShortcut()
 	updateSidebarLinks()
-	socket.on('publish_lms_notifications', (data) => {
+	loadUnreadCount()
+	socket.on('publish_lms_notifications', () => {
 		unreadNotifications.reload()
 	})
 })
 
+// The count lives in stores/notifications now, so the badge follows it rather
+// than being written from the resource's onSuccess.
+watch(unreadCount, () => updateUnreadCount())
+
 const updateSidebarLinksVisibility = () => {
-	sidebarSettings.reload(
-		{},
-		{
-			onSuccess(data) {
-				Object.keys(data).forEach((key) => {
-					if (!parseInt(data[key])) {
-						sidebarLinks.value.forEach((link) => {
-							link.items = link.items.filter(
-								(item) => item.label.toLowerCase().split(' ').join('_') !== key
-							)
-						})
-					}
+	loadSidebarSettings().then(() => {
+		const data = sidebarSettings.data
+		if (!data) return
+		Object.keys(data).forEach((key) => {
+			if (!parseInt(data[key])) {
+				sidebarLinks.value.forEach((link) => {
+					link.items = link.items.filter(
+						(item) => item.label.toLowerCase().split(' ').join('_') !== key
+					)
 				})
-			},
-		}
-	)
+			}
+		})
+	})
 }
 
 const addKeyboardShortcut = () => {
@@ -370,25 +382,6 @@ const addKeyboardShortcut = () => {
 const toggleCommandPalette = () => {
 	settingsStore.isCommandPaletteOpen = !settingsStore.isCommandPaletteOpen
 }
-
-const unreadNotifications = createResource({
-	cache: 'Unread Notifications Count',
-	url: 'frappe.client.get_count',
-	makeParams(values) {
-		return {
-			doctype: 'Notification Log',
-			filters: {
-				for_user: user,
-				read: 0,
-			},
-		}
-	},
-	onSuccess(data) {
-		unreadCount.value = data
-		updateUnreadCount()
-	},
-	auto: user ? true : false,
-})
 
 const updateUnreadCount = () => {
 	sidebarLinks.value?.forEach((link) => {
@@ -410,7 +403,7 @@ const deletePage = (link) => {
 		doctype: 'LMS Sidebar Item',
 		documents: [link.name],
 	}).then(() => {
-		sidebarSettings.reload()
+		loadSidebarSettings(true)
 		toast.success(__('Page deleted successfully'))
 	})
 }
@@ -472,7 +465,7 @@ const steps = reactive([
 					hash: '#settings',
 				})
 			} else {
-				router.push({ name: 'Courses', query: { newCourse: '1' } })
+				openFormRoute(router, { name: 'NewCourse' })
 			}
 		},
 	},
@@ -492,7 +485,7 @@ const steps = reactive([
 					hash: '#settings',
 				})
 			} else {
-				router.push({ name: 'Courses', query: { newCourse: '1' } })
+				openFormRoute(router, { name: 'NewCourse' })
 			}
 		},
 	},
@@ -539,13 +532,13 @@ const steps = reactive([
 			let batch = await getFirstBatch()
 			if (batch) {
 				router.push({
-					name: 'Batch',
+					name: 'BatchDetail',
 					params: {
 						batchName: batch,
 					},
 				})
 			} else {
-				router.push({ name: 'Batch' })
+				router.push({ name: 'Batches' })
 			}
 		},
 	},
@@ -560,14 +553,14 @@ const steps = reactive([
 			let batch = await getFirstBatch()
 			if (batch) {
 				router.push({
-					name: 'Batch',
+					name: 'BatchDetail',
 					params: {
 						batchName: batch,
 					},
 					hash: '#courses',
 				})
 			} else {
-				router.push({ name: 'Batch' })
+				router.push({ name: 'Batches' })
 			}
 		},
 	},
@@ -664,6 +657,12 @@ watch(settingsStore.settings, () => {
 	updateSidebarLinks()
 })
 
+watch(
+	() => sidebarSettings.data,
+	() => updateSidebarLinks(),
+	{ deep: true }
+)
+
 const updateSidebarLinks = () => {
 	sidebarLinks.value = getSidebarLinks()
 	updateSidebarLinksVisibility()
@@ -671,7 +670,7 @@ const updateSidebarLinks = () => {
 }
 
 const redirectToWebsite = () => {
-	window.open('https://frappe.io/learning', '_blank')
+	openExternal('https://frappe.io/learning')
 }
 
 const isStudent = computed(() => {
@@ -710,9 +709,8 @@ const calculateTrialEndDays = (trialEndDate) => {
 }
 
 const redirectToAppointmentScreen = () => {
-	window.open(
-		'https://calendar.google.com/calendar/u/0/appointments/schedules/AcZssZ0c7Z3XIpW1WgbeIuktSaoX6qudoYuSdRbIlJty5TW7p4IZaOk5viHQGwTNi6HpNVqzOZOTHcle',
-		'_blank'
+	openExternal(
+		'https://calendar.google.com/calendar/u/0/appointments/schedules/AcZssZ0c7Z3XIpW1WgbeIuktSaoX6qudoYuSdRbIlJty5TW7p4IZaOk5viHQGwTNi6HpNVqzOZOTHcle'
 	)
 }
 

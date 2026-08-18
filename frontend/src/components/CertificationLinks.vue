@@ -55,7 +55,8 @@
 <script setup lang="ts">
 import { Button, createResource } from 'frappe-ui'
 import { inject } from 'vue'
-import type { CertificationInfo, Resource, SessionUser } from '@/types/api'
+import type { CertificationInfo, Resource, SessionUser } from '@/types'
+import { openExternal } from '@/utils/openExternal'
 
 const user = inject<SessionUser>('$user')!
 
@@ -76,7 +77,7 @@ const certification = createResource({
 const downloadCertificate = () => {
 	const cert = certification.data?.certificate
 	if (!cert) return
-	window.open(
+	openExternal(
 		`/api/method/frappe.utils.print_format.download_pdf?doctype=LMS+Certificate&name=${
 			cert.name
 		}&format=${encodeURIComponent(cert.template)}`

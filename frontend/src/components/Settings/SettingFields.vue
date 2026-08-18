@@ -1,12 +1,14 @@
 <template>
 	<div>
 		<template v-for="(section, index) in sections" :key="index">
-			<!-- Divider only between topics (sections), never between fields -->
-			<div v-if="index > 0" class="h-px border-t border-outline-elevation-2" />
+			<div
+				v-if="index > 0"
+				class="mt-2 h-px border-t border-outline-elevation-2"
+			/>
 			<div
 				v-if="section.label"
-				class="text-p-md font-semibold text-ink-gray-9 mb-1"
-				:class="{ 'mt-5': index > 0 }"
+				class="text-p-base-semibold text-ink-gray-8 mb-1"
+				:class="{ 'mt-6': index > 0 }"
 			>
 				{{ section.label }}
 			</div>
@@ -18,7 +20,6 @@
 					v-for="(field, fieldIndex) in column.fields"
 					:key="`${columnIndex}-${fieldIndex}`"
 				>
-					<!-- Upload: full-width block (label/description sit above) -->
 					<div v-if="field.type == 'Upload'" class="py-3">
 						<div class="space-y-1 mb-2">
 							<div class="text-p-base-medium text-ink-gray-7">
@@ -31,16 +32,23 @@
 						<FileUploader
 							v-if="!data[field.name]"
 							:fileTypes="['image/*']"
+							:uploadArgs="{ private: !field.public }"
 							:validateFile="validateFile"
 							@success="(file) => (data[field.name] = file.file_url)"
 						>
 							<template
 								v-slot="{ file, progress, uploading, openFileSelector }"
 							>
-								<div class="">
-									<Button @click="openFileSelector" :loading="uploading">
+								<div>
+									<Button
+										class="text-p-base-medium"
+										:loading="uploading"
+										@click="openFileSelector"
+									>
 										{{
-											uploading ? `Uploading ${progress}%` : 'Upload an image'
+											uploading
+												? __('Uploading {0}%').format(progress)
+												: __('Upload an image')
 										}}
 									</Button>
 								</div>
@@ -53,17 +61,20 @@
 									:class="field.size == 'lg' ? 'px-5 py-5' : 'px-20 py-8'"
 								>
 									<img
-										:src="data[field.name]"
+										:src="safeUrl(fileUrl(data[field.name]))"
+										alt=""
 										class="rounded"
 										:class="field.size == 'lg' ? 'w-36' : 'size-6'"
 									/>
 								</div>
 								<div class="flex flex-col flex-wrap">
 									<span class="break-all text-ink-gray-9">
-										{{ data[field.name].split('/').pop() }}
+										{{ fileName(data[field.name]) }}
 									</span>
 								</div>
-								<span
+								<button
+									type="button"
+									:aria-label="__('Remove image')"
 									@click="data[field.name] = null"
 									class="lucide-x border text-ink-gray-7 border-outline-elevation-2 rounded-md cursor-pointer w-5 h-5 p-1 ms-4"
 								/>
@@ -71,7 +82,6 @@
 						</div>
 					</div>
 
-					<!-- Code/HTML: full-width block -->
 					<div v-else-if="field.type == 'Code'" class="py-3">
 						<CodeEditor
 							:label="__(field.label)"
@@ -85,26 +95,26 @@
 						</CodeEditor>
 					</div>
 
-					<!-- Textarea: full-width block (label/description above, like CRM) -->
 					<div v-else-if="field.type == 'textarea'" class="py-3">
-						<div class="space-y-1 mb-2">
-							<div class="text-p-base-medium text-ink-gray-7">
-								{{ __(field.label) }}
-							</div>
-							<div v-if="field.description" class="text-p-sm text-ink-gray-5">
-								{{ __(field.description) }}
-							</div>
+						<div class="text-p-base-medium text-ink-gray-7 mb-2">
+							{{ __(field.label) }}
 						</div>
 						<FormControl
 							type="textarea"
 							:rows="field.rows || 3"
 							v-model="data[field.name]"
 							:required="field.reqd"
+							:aria-label="__(field.label)"
 							:placeholder="field.placeholder || __(field.label)"
 						/>
+						<div
+							v-if="field.description"
+							class="text-p-sm text-ink-gray-5 mt-2"
+						>
+							{{ __(field.description) }}
+						</div>
 					</div>
 
-					<!-- Normal field: label + description on the left, control on the right (CRM layout) -->
 					<div v-else class="flex items-center justify-between gap-4 py-3">
 						<div class="flex flex-col">
 							<div class="text-p-base-medium text-ink-gray-7">
@@ -115,22 +125,24 @@
 							</div>
 						</div>
 						<div class="shrink-0">
-							<Switch
+							<BooleanSwitch
 								v-if="field.type == 'checkbox'"
 								size="sm"
-								v-model="field.value"
+								v-model="data[field.name]"
 							/>
 							<Link
 								v-else-if="field.type == 'Link'"
 								v-model="data[field.name]"
 								:doctype="field.doctype"
 								:required="field.reqd"
+								:aria-label="__(field.label)"
 								class="w-48"
 							/>
 							<Select
 								v-else-if="field.type == 'select'"
 								v-model="data[field.name]"
 								:options="field.options"
+								:aria-label="__(field.label)"
 								class="w-48"
 							/>
 							<FormControl
@@ -141,7 +153,9 @@
 								:rows="field.rows"
 								:options="field.options"
 								:required="field.reqd"
+								:min="field.min"
 								class="w-48"
+								:aria-label="__(field.label)"
 								:placeholder="field.placeholder || __(field.label)"
 							/>
 						</div>
@@ -152,12 +166,24 @@
 	</div>
 </template>
 <script setup>
-import { FormControl, FileUploader, Button, Select } from 'frappe-ui'
-import Switch from '@/components/Controls/Switch.vue'
-import { onMounted, watch } from 'vue'
+import { Button, FileUploader, FormControl, Select } from 'frappe-ui'
+import BooleanSwitch from '@/components/Controls/BooleanSwitch.vue'
+import { watch } from 'vue'
 import { validateFile } from '@/utils'
 import Link from '@/components/Controls/Link.vue'
 import CodeEditor from '@/components/Controls/CodeEditor.vue'
+import { seedCheckboxDefaults } from '@/components/Settings/mobileSettings'
+import { safeUrl } from '@/utils/safeUrl'
+
+// The FileUploader above binds :uploadArgs="{ private: !field.public }", and it
+// is written inline deliberately. Privacy is the FIELD's decision, never this
+// component's: the backend maps every Attach / Attach Image field of a
+// third-party <Gateway> Settings doctype to type 'Upload' (api.py
+// get_transformed_fields), and those reach here via PaymentGatewayDetails —
+// merchant QR codes and KYC documents among them. Only a field that opts in with
+// `public: true` may be world-readable; everything else keeps frappe's private
+// default. Behind a helper the privacy ratchet in publicImageUploads.test.ts can
+// only see "computed" and would stop catching a flip to public.
 
 const props = defineProps({
 	sections: {
@@ -170,44 +196,23 @@ const props = defineProps({
 	},
 })
 
-const resolveInitialValue = (field, dataValue) => {
-	if (dataValue !== null && dataValue !== undefined && dataValue !== '') {
-		return field.type === 'checkbox' ? !!dataValue : dataValue
-	}
-	if (field.default !== undefined) {
-		return field.type === 'checkbox' ? !!field.default : field.default
-	}
-	return field.type === 'checkbox' ? false : ''
+// Attach fields arrive from the backend as a {file_name, file_url} object, but
+// become a plain file_url string after a fresh upload. Handle both shapes.
+const fileUrl = (value) =>
+	value && typeof value === 'object' ? value.file_url : value
+
+const fileName = (value) => {
+	const url = fileUrl(value)
+	return value && typeof value === 'object' && value.file_name
+		? value.file_name
+		: (url || '').split('/').pop()
 }
 
-onMounted(() => {
-	props.sections.forEach((section) => {
-		section.columns.forEach((column) => {
-			column.fields.forEach((field) => {
-				field.value = resolveInitialValue(field, props.data[field.name])
-			})
-		})
-	})
-})
-
 watch(
-	props.sections,
-	(newSections) => {
-		// Only checkboxes v-model on field.value; sync them to data so the
-		// document resource sees the change. Non-checkbox fields v-model
-		// directly against data and must NOT be touched here — otherwise the
-		// stale field.value clobbers user input whenever any checkbox toggles.
-		newSections.forEach((section) => {
-			section.columns.forEach((column) => {
-				column.fields.forEach((field) => {
-					if (field.type !== 'checkbox') return
-					if (props.data[field.name] != field.value) {
-						props.data[field.name] = field.value
-					}
-				})
-			})
-		})
+	() => props.data,
+	(data) => {
+		if (data) seedCheckboxDefaults(props.sections, data)
 	},
-	{ deep: true }
+	{ immediate: true }
 )
 </script>

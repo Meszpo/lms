@@ -1,23 +1,25 @@
 <template>
 	<div class="py-5 px-5 w-full lg:w-3/4 lg:px-0 mx-auto">
 		<div class="flex items-center justify-between mb-5">
-			<div class="text-xl-semibold text-ink-gray-9">
+			<h1 class="text-lg-semibold text-ink-gray-9">
 				{{ __('All Programs') }}
-			</div>
-			<TabButtons v-model="currentTab" :buttons="tabs" class="w-fit" />
+			</h1>
+			<TabButtons v-model="currentTab" :options="tabs" class="w-fit" />
 		</div>
-		<div v-for="(data, category) in programs.data">
+		<div v-for="(data, category) in programs.data" :key="category">
 			<div v-if="category == currentTab">
 				<div
 					v-if="data.length > 0"
 					class="grid grid-cols-1 lg:grid-cols-3 gap-5"
 				>
-					<div
+					<button
+						type="button"
 						v-for="program in data"
+						:key="program.name"
 						@click="openDetails(program.name, category)"
-						class="border rounded-md p-3 hover:border-outline-gray-3 cursor-pointer"
+						class="block w-full border rounded-md p-3 hover:border-outline-gray-3 cursor-pointer text-start"
 					>
-						<div class="text-xl-semibold text-ink-gray-9 mb-2">
+						<div class="text-lg-semibold text-ink-gray-9 mb-2">
 							{{ program.name }}
 						</div>
 
@@ -44,22 +46,17 @@
 								{{ Math.ceil(program.progress) }}% {{ __('completed') }}
 							</div>
 						</div>
-					</div>
+					</button>
 				</div>
-				<EmptyStateLayout
-					v-else
-					:name="convertToTitleCase(category) + ' Programs'"
-				/>
-				<!-- <div v-else class="col-span-3 text-center text-ink-gray-5">
-                    {{ __('No programs found in this category.') }}
-                </div> -->
+				<div v-else class="flex-1">
+					<EmptyStateLayout
+						:name="convertToTitleCase(category) + ' Programs'"
+						icon="lucide-graduation-cap"
+					/>
+				</div>
 			</div>
 		</div>
 	</div>
-	<ProgramEnrollment
-		v-model="showEnrollmentConfirmation"
-		:programName="enrollmentProgram"
-	/>
 </template>
 <script setup lang="ts">
 import { createResource, TabButtons } from 'frappe-ui'
@@ -68,13 +65,11 @@ import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { convertToTitleCase } from '@/utils'
 import ProgressBar from '@/components/ProgressBar.vue'
-import ProgramEnrollment from '@/pages/Programs/ProgramEnrollment.vue'
 import EmptyStateLayout from '@/components/Layouts/EmptyStateLayout.vue'
+import { openFormRoute } from '@/composables/useFormRoute'
 
 const currentTab = ref('enrolled')
 const router = useRouter()
-const showEnrollmentConfirmation = ref(false)
-const enrollmentProgram = ref(null)
 
 const programs = createResource({
 	url: 'lms.lms.utils.get_programs',
@@ -88,8 +83,12 @@ const openDetails = (programName: any, category: string) => {
 			params: { programName: programName },
 		})
 	} else {
-		showEnrollmentConfirmation.value = true
-		enrollmentProgram.value = programName
+		// openFormRoute, not a bare router.push: it stamps the history entry so
+		// cancelling pops back to this list rather than ejecting out of the app.
+		openFormRoute(router, {
+			name: 'ProgramEnrollment',
+			params: { programName: programName },
+		})
 	}
 }
 

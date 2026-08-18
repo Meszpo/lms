@@ -9,32 +9,45 @@
 					open: index == 1,
 					'self-start mt-0.5': inlineSelect,
 				}"
-				class="lucide-chevron-right size-4 text-ink-gray-9 stroke-1 transform duration-200"
+				class="lucide-chevron-right size-4 text-ink-gray-9 transform duration-200"
 			/>
 			<div
 				class="ms-2 min-w-0 flex-1 text-start"
 				:class="inlineSelect ? '' : 'flex items-baseline justify-between gap-3'"
 				@click="redirectToChapter"
 			>
+				<TextInput
+					v-if="isRenaming"
+					ref="renameInput"
+					v-model="renameValue"
+					class="w-full"
+					@click.stop.prevent
+					@keydown.enter.stop.prevent="commitRename"
+					@keydown.esc.stop.prevent="cancelRename"
+					@blur="commitRename"
+				/>
 				<div
+					v-else
 					class="truncate text-base-medium leading-5 text-ink-gray-9"
 					:title="chapter.title"
+					@dblclick="allowEdit && !chapter.is_scorm_package && startRename()"
 				>
 					{{ chapter.title }}
 				</div>
-				<div
+			</div>
+			<div class="flex ms-3 items-center gap-x-4 shrink-0">
+				<!-- Lesson count in the corner (student-view style). When the chapter
+				is editable it gives way to the delete action on hover. -->
+				<span
 					v-if="!chapter.is_scorm_package && chapter.lessons?.length"
-					class="text-ink-gray-5 shrink-0"
-					:class="inlineSelect ? 'mt-0.5 text-xs leading-4' : 'text-sm'"
+					class="text-sm text-ink-gray-5"
+					:class="{ 'group-hover:hidden': allowEdit }"
 				>
 					{{ chapter.lessons.length }}
-					{{ chapter.lessons.length === 1 ? __('lesson') : __('lessons') }}
-				</div>
-			</div>
-			<div class="flex ms-auto gap-x-4 shrink-0">
+				</span>
 				<Tooltip :text="__('Edit Chapter')" placement="bottom">
 					<span
-						v-if="allowEdit"
+						v-if="allowEdit && chapter.is_scorm_package"
 						@click.prevent="emit('edit-chapter', chapter)"
 						class="lucide-file-pen-line size-4 text-ink-gray-9 invisible group-hover:visible"
 					/>
@@ -43,7 +56,7 @@
 					<span
 						v-if="allowEdit"
 						@click.prevent="emit('delete-chapter', chapter.name)"
-						class="lucide-trash-2 size-4 text-ink-red-6 invisible group-hover:visible"
+						class="lucide-trash-2 size-4 text-ink-red-6 hidden group-hover:inline-block"
 					/>
 				</Tooltip>
 			</div>
@@ -64,7 +77,11 @@
 				<template #item="{ element: lesson }">
 					<div
 						class="outline-lesson ps-8 py-2 pe-4 text-ink-gray-9"
-						:class="isActiveLesson(lesson.number) ? 'bg-surface-gray-3' : ''"
+						:class="
+							isActiveLesson(lesson.number)
+								? 'bg-surface-gray-3 rounded-md'
+								: ''
+						"
 					>
 						<component
 							:is="inlineSelect ? 'div' : 'router-link'"
@@ -115,7 +132,10 @@
 				</template>
 			</Draggable>
 			<div v-if="allowEdit" class="flex mt-2 mb-4 ps-8">
-				<Button @click="addLesson">
+				<Button :loading="creatingLesson" @click="addLesson">
+					<template #prefix>
+						<span class="lucide-plus size-4" />
+					</template>
 					{{ __('Add Lesson') }}
 				</Button>
 			</div>
@@ -124,13 +144,13 @@
 </template>
 
 <script setup lang="ts">
-import { Button, Tooltip, toast } from 'frappe-ui'
-import { computed, inject } from 'vue'
+import { Button, TextInput, Tooltip, toast } from 'frappe-ui'
+import { computed, inject, nextTick, ref, watch } from 'vue'
 import Draggable from 'vuedraggable'
 import { Disclosure, DisclosureButton, DisclosurePanel } from '@headlessui/vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { RouteLocationRaw } from 'vue-router'
-import type { OutlineChapter, OutlineLesson, SessionUser } from '@/types/api'
+import type { OutlineChapter, OutlineLesson, SessionUser } from '@/types'
 
 interface DraggableEvent {
 	item: { __draggable_context: { element: OutlineChapter | OutlineLesson } }
@@ -148,30 +168,75 @@ const props = withDefaults(
 		inlineSelect?: boolean
 		editorLinks?: boolean
 		selectedLessonNumber?: string
+		creatingLesson?: boolean
 	}>(),
 	{
 		allowEdit: false,
 		inlineSelect: false,
 		editorLinks: false,
 		selectedLessonNumber: '',
+		creatingLesson: false,
 	}
 )
 
 const emit = defineEmits<{
 	'select-lesson': [{ chapterNumber: string; lessonNumber: string }]
 	'edit-chapter': [OutlineChapter]
+	'rename-chapter': [{ chapter: OutlineChapter; title: string }]
+	'renaming-change': [boolean]
 	'delete-chapter': [string]
 	'delete-lesson': [{ lesson: string; chapter: string }]
 	'move-lesson': [DraggableEvent]
-	'add-lesson': [{ chapter: OutlineChapter; lessonIdx: number }]
+	'create-lesson': [{ chapter: OutlineChapter; lessonIdx: number }]
 }>()
 
 const route = useRoute()
 const router = useRouter()
 const user = inject<SessionUser>('$user')!
 
+const isRenaming = ref<boolean>(false)
+const renameValue = ref<string>('')
+const renameInput = ref<{ el: HTMLInputElement } | null>(null)
+
+// Tell the parent outline to lock chapter dragging while a name is being edited,
+// so a stray drag can't fire mid-rename.
+watch(isRenaming, (renaming) => emit('renaming-change', renaming))
+
+function startRename(): void {
+	renameValue.value = props.chapter.title
+	isRenaming.value = true
+	nextTick(() => {
+		renameInput.value?.el?.focus()
+	})
+}
+
+function commitRename(): void {
+	if (!isRenaming.value) return
+	isRenaming.value = false
+	const title = renameValue.value.trim()
+	if (!title || title === props.chapter.title) return
+	emit('rename-chapter', { chapter: props.chapter, title })
+}
+
+function cancelRename(): void {
+	isRenaming.value = false
+	renameValue.value = props.chapter.title
+}
+
 const defaultOpen = computed<boolean>(() => {
-	const active = route.params.chapterNumber
+	// Which chapter is expanded on (re)mount. The student lesson view carries
+	// the active lesson in route params; the in-page editor carries it in
+	// ?editLesson ("<chapter>-<lesson>"), which survives navigating away and
+	// back, with selectedLessonNumber as a fallback. Default to the first
+	// chapter only when nothing is active.
+	const editChapter =
+		typeof route.query.editLesson === 'string'
+			? route.query.editLesson.split('-')[0]
+			: ''
+	const active =
+		route.params.chapterNumber ||
+		editChapter ||
+		props.selectedLessonNumber.split('-')[0]
 	return active ? props.chapter.idx == Number(active) : props.chapter.idx == 1
 })
 
@@ -198,8 +263,8 @@ function lessonRoute(lesson: OutlineLesson): RouteLocationRaw {
 		return {
 			name: 'CourseDetail',
 			params: { courseName: props.courseName },
-			hash: '#course editor',
-			query: { editLesson: lesson.number, lessonMode: 'edit' },
+			hash: '#editor',
+			query: { editLesson: lesson.number },
 		}
 	}
 	return {
@@ -217,7 +282,7 @@ function onLessonClick(lesson: OutlineLesson) {
 }
 
 function addLesson() {
-	emit('add-lesson', {
+	emit('create-lesson', {
 		chapter: props.chapter,
 		lessonIdx: (props.chapter.lessons?.length ?? 0) + 1,
 	})

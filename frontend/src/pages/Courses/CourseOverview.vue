@@ -6,7 +6,7 @@
 		>
 			<div class="md:w-2/3 space-y-10 min-w-0">
 				<section class="space-y-4">
-					<h1 class="text-5xl-semibold text-ink-gray-9">
+					<h1 class="text-4xl-semibold text-ink-gray-9">
 						{{ course.data.title }}
 					</h1>
 					<div
@@ -27,9 +27,7 @@
 						</template>
 						<template v-if="Number(course.data.rating) > 0">
 							<div class="flex items-center gap-1">
-								<span
-									class="lucide-star size-4 text-yellow-500 fill-yellow-500"
-								/>
+								<LucideStar class="size-4 text-transparent fill-yellow-500" />
 								<span class="font-medium text-ink-gray-9">{{
 									formatRating(course.data.rating)
 								}}</span>
@@ -91,7 +89,7 @@
 
 				<section>
 					<div class="flex items-baseline justify-between gap-4 mb-4">
-						<h2 class="text-4xl-semibold text-ink-gray-9">
+						<h2 class="text-3xl-semibold text-ink-gray-9">
 							{{ __('Course content') }}
 						</h2>
 						<div class="text-base text-ink-gray-5">
@@ -101,8 +99,8 @@
 					<div class="border rounded-md p-2">
 						<SkeletonLoader
 							v-if="outline.loading && !outline.data"
-							variant="list"
-							:count="6"
+							variant="course-outline"
+							:count="10"
 						/>
 						<div
 							v-else-if="!hasCourseContent"
@@ -122,11 +120,11 @@
 				</section>
 
 				<section v-if="course.data.description" class="space-y-3">
-					<h2 class="text-4xl-semibold text-ink-gray-9">
+					<h2 class="text-3xl-semibold text-ink-gray-9">
 						{{ __('About this course') }}
 					</h2>
 					<div
-						v-html="course.data.description"
+						v-safe-html:rich="course.data.description"
 						class="ProseMirror prose prose-sm max-w-none !whitespace-normal prose-table:table-fixed prose-td:p-2 prose-th:p-2 prose-td:border prose-th:border prose-td:border-outline-gray-2 prose-th:border-outline-gray-2 prose-td:relative prose-th:relative prose-th:bg-surface-gray-2"
 					/>
 				</section>
@@ -151,10 +149,15 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject } from 'vue'
+import { computed, inject, watch } from 'vue'
 import { createResource, Badge } from 'frappe-ui'
 import { formatAmount, formatRating } from '@/utils/'
-import type { SessionUser } from '@/types/api'
+import type {
+	CourseDetails,
+	OutlineChapter,
+	Resource,
+	SessionUser,
+} from '@/types'
 import CourseCardOverlay from '@/components/CourseCardOverlay.vue'
 import CourseOutline from '@/components/CourseOutline.vue'
 import SkeletonLoader from '@/components/SkeletonLoader.vue'
@@ -163,7 +166,6 @@ import CourseInstructors from '@/components/CourseInstructors.vue'
 import CourseCreatorCard from '@/components/CourseCreatorCard.vue'
 import UserAvatar from '@/components/UserAvatar.vue'
 import RelatedCourses from '@/components/RelatedCourses.vue'
-import type { CourseDetails, OutlineChapter, Resource } from '@/types/api'
 
 const props = defineProps<{
 	course: Resource<CourseDetails | null>
@@ -183,12 +185,19 @@ const isCourseAdmin = computed<boolean>(
 
 const outline = createResource({
 	url: 'lms.lms.utils.get_course_outline',
-	cache: ['course_outline', props.course.data?.name],
 	makeParams() {
 		return { course: props.course.data?.name, progress: false }
 	},
-	auto: true,
+	auto: false,
 }) as Resource<OutlineChapter[]>
+
+watch(
+	() => props.course.data?.name,
+	(name) => {
+		if (name) outline.fetch()
+	},
+	{ immediate: true }
+)
 
 const outlineStats = computed(() => {
 	const chapters = outline.data || []

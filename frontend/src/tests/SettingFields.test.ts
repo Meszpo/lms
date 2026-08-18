@@ -29,9 +29,9 @@ vi.mock('frappe-ui', () => ({
 	FileUploader: { template: '<div />' },
 	Button: { template: '<button />' },
 }))
-// Checkboxes use the project-local Switch (v-modeled on field.value), not the
-// frappe-ui one — mock it so toggling emits update:modelValue.
-vi.mock('@/components/Controls/Switch.vue', () => ({
+// Checkboxes use the project-local BooleanSwitch (v-modeled on data[field.name],
+// the persisted source of truth). Mock it so toggling emits update:modelValue.
+vi.mock('@/components/Controls/BooleanSwitch.vue', () => ({
 	default: {
 		props: ['modelValue'],
 		emits: ['update:modelValue'],
@@ -64,7 +64,7 @@ const mountFields = (sections: any[], data: any) =>
 		global: { mocks: { __: (s: string) => s } },
 	})
 
-describe('SettingFields — number input persists to data', () => {
+describe('SettingFields: number input persists to data', () => {
 	it('typing into a number field updates data[field.name]', async () => {
 		const sections = reactive([
 			{
@@ -138,16 +138,74 @@ describe('SettingFields — number input persists to data', () => {
 		await flushPromises()
 		await nextTick()
 
-		// The previously-typed dwell time must survive — the watcher
-		// must NOT sync the stale field.value over the user's input.
+		// The previously-typed dwell time must survive. The watcher must
+		// NOT sync the stale field.value over the user's input.
 		expect(data.lesson_dwell_time).toBe('1')
 		// And the checkbox toggle must persist to data.
 		expect(data.enforce_video_completion).toBe(true)
 	})
 })
 
-describe('SettingFields — defaults surface in the input when data is empty', () => {
-	it('uses field.default when data[field.name] is undefined', async () => {
+describe('SettingFields: Upload field renders both object and string values', () => {
+	const uploadSections = () =>
+		reactive([
+			{
+				columns: [
+					{
+						fields: [
+							{
+								label: 'Brand image',
+								name: 'brand_image',
+								type: 'Upload',
+							},
+						],
+					},
+				],
+			},
+		])
+
+	// Regression: the backend (get_payment_gateway_details -> get_file_info)
+	// hands back an Attach value as a {file_name, file_url} object, but the
+	// template used to call data[field.name].split('/') on it, throwing
+	// "split is not a function" and blanking the whole settings dialog.
+	it('does not throw when the value is a {file_name, file_url} object', async () => {
+		const data = reactive({
+			brand_image: {
+				file_name: 'logo.png',
+				file_url: '/files/logo.png',
+				file_size: 1234,
+			},
+		})
+		const wrapper = mountFields(uploadSections(), data)
+		await flushPromises()
+
+		// Shows the file name from the object...
+		expect(wrapper.text()).toContain('logo.png')
+		// ...and the <img> src is the object's file_url, not [object Object].
+		expect(wrapper.get('img').attributes('src')).toBe('/files/logo.png')
+	})
+
+	it('falls back to the URL basename when the value is a plain string', async () => {
+		// A fresh upload sets data[field.name] = file.file_url (a string).
+		const data = reactive({ brand_image: '/files/fresh-upload.png' })
+		const wrapper = mountFields(uploadSections(), data)
+		await flushPromises()
+
+		expect(wrapper.text()).toContain('fresh-upload.png')
+		expect(wrapper.get('img').attributes('src')).toBe('/files/fresh-upload.png')
+	})
+
+	it('renders the uploader (no image) when the value is empty', async () => {
+		const data = reactive<Record<string, unknown>>({ brand_image: '' })
+		const wrapper = mountFields(uploadSections(), data)
+		await flushPromises()
+
+		expect(wrapper.find('img').exists()).toBe(false)
+	})
+})
+
+describe('SettingFields: checkbox defaults seed the persisted doc when empty', () => {
+	it('does not seed non-checkbox defaults into data (parity: numbers bind data directly)', async () => {
 		const sections = reactive([
 			{
 				columns: [
@@ -169,14 +227,12 @@ describe('SettingFields — defaults surface in the input when data is empty', (
 		await flushPromises()
 		await nextTick()
 
-		// After onMounted runs, field.value should be the default;
-		// the watcher (on the next mutation) is checkbox-only, but the
-		// resolveInitialValue helper sets field.value at mount time.
-		const field = sections[0].columns[0].fields[0] as any
-		expect(field.value).toBe(30)
+		// Number/text/select fields bind data[field.name] directly and are never
+		// seeded, matching prior behavior where an empty doc showed an empty input.
+		expect(data.lesson_dwell_time).toBeUndefined()
 	})
 
-	it('checkbox default of 1 maps to true', async () => {
+	it('checkbox default of 1 seeds data[field.name] = 1 (renders on)', async () => {
 		const sections = reactive([
 			{
 				columns: [
@@ -197,11 +253,13 @@ describe('SettingFields — defaults surface in the input when data is empty', (
 		const wrapper = mountFields(sections, data)
 		await flushPromises()
 
-		const field = sections[0].columns[0].fields[0] as any
-		expect(field.value).toBe(true)
+		expect(data.enforce_quiz_completion).toBe(1)
+		expect(
+			wrapper.get('[data-testid="switch"]').attributes('data-checked')
+		).toBe('true')
 	})
 
-	it('checkbox default of 0 maps to false', async () => {
+	it('checkbox default of 0 seeds data[field.name] = 0 (renders off)', async () => {
 		const sections = reactive([
 			{
 				columns: [
@@ -222,7 +280,36 @@ describe('SettingFields — defaults surface in the input when data is empty', (
 		const wrapper = mountFields(sections, data)
 		await flushPromises()
 
-		const field = sections[0].columns[0].fields[0] as any
-		expect(field.value).toBe(false)
+		expect(data.enforce_video_completion).toBe(0)
+		expect(
+			wrapper.get('[data-testid="switch"]').attributes('data-checked')
+		).toBe('false')
+	})
+
+	it('does not overwrite a saved checkbox value with its default', async () => {
+		const sections = reactive([
+			{
+				columns: [
+					{
+						fields: [
+							{
+								label: 'Enforce quiz',
+								name: 'enforce_quiz_completion',
+								type: 'checkbox',
+								default: 1,
+							},
+						],
+					},
+				],
+			},
+		])
+		// Saved as off; the default (1) must not flip it back on.
+		const data = reactive<Record<string, unknown>>({
+			enforce_quiz_completion: 0,
+		})
+		const wrapper = mountFields(sections, data)
+		await flushPromises()
+
+		expect(data.enforce_quiz_completion).toBe(0)
 	})
 })

@@ -1,183 +1,99 @@
 <template>
-	<LayoutHeader>
-		<template #left-header>
-			<Breadcrumbs :items="breadcrumbs" />
-		</template>
-		<template #right-header>
-			<Button v-if="!readOnlyMode" variant="solid" @click="showForm = true">
+	<ListPage
+		:breadcrumbs="breadcrumbs"
+		:title="__('{0} Quizzes').format(totalQuizzes.data || 0)"
+		layout="list"
+		:columns="quizColumns"
+		:rows="quizzes.data || []"
+		:list-options="listOptions"
+		:total-count="totalQuizzes.data ?? 0"
+		:loading="quizzes.list.loading"
+		:has-next-page="quizzes.hasNextPage"
+		v-model:page-length="pageLength"
+		empty-name="Quizzes"
+		empty-icon="lucide-circle-help"
+		@load-more="quizzes.next()"
+	>
+		<template #actions>
+			<Button v-if="!readOnlyMode" variant="solid" @click="createQuiz">
 				<template #prefix>
 					<span class="lucide-plus size-4" />
 				</template>
 				{{ __('Create') }}
 			</Button>
 		</template>
-	</LayoutHeader>
 
-	<div class="flex min-h-0 flex-1 flex-col pt-5">
-		<div
-			class="mx-5 mb-5 flex flex-col justify-between gap-y-4 sm:flex-row sm:items-center"
-		>
-			<div class="text-xl-semibold text-ink-gray-9">
-				{{ __('{0} Quizzes').format(quizzes.data?.length) }}
-			</div>
-			<FormControl v-model="search" type="text" placeholder="Search">
+		<template #filters>
+			<FormControl
+				v-model="search"
+				type="text"
+				:placeholder="__('Search')"
+				:aria-label="__('Search')"
+			>
 				<template #prefix>
 					<span class="lucide-search size-4 text-ink-gray-5" />
 				</template>
 			</FormControl>
-		</div>
-		<ListView
-			v-if="quizzes.data?.length"
-			:columns="quizColumns"
-			:rows="quizzes.data"
-			row-key="name"
-			:options="{ showTooltip: false, selectable: true }"
-			class="flex-1 overflow-y-auto px-5"
-		>
-			<ListHeader class="mb-2 grid items-center rounded bg-surface-gray-2 p-2">
-				<ListHeaderItem :item="item" v-for="item in quizColumns">
-					<template #prefix="{ item }">
-						<FeatherIcon :name="item.icon?.toString()" class="h-4 w-4" />
-					</template>
-				</ListHeaderItem>
-			</ListHeader>
-			<ListRows>
-				<router-link
-					v-for="row in quizzes.data"
-					:to="{
-						name: 'QuizForm',
-						params: {
-							quizID: row.name,
-						},
-					}"
-				>
-					<ListRow :row="row" class="hover:bg-surface-gray-2">
-						<template #default="{ column, item }">
-							<ListRowItem :item="row[column.key]" :align="column.align">
-								<div v-if="column.key == 'show_answers'">
-									<Checkbox v-model="row[column.key]" :disabled="true" />
-								</div>
-								<div
-									v-else-if="column.key == 'modified'"
-									class="text-sm text-ink-gray-5"
-								>
-									{{ row[column.key] }}
-								</div>
-								<div v-else>
-									{{ row[column.key] }}
-								</div>
-							</ListRowItem>
-						</template>
-					</ListRow>
-				</router-link>
-			</ListRows>
-			<ListSelectBanner class="bottom-50">
-				<template #actions="{ unselectAll, selections }">
-					<div class="flex gap-2">
-						<Button
-							variant="ghost"
-							@click="deleteQuiz(selections, unselectAll)"
-						>
-							<span class="lucide-trash-2 size-4" />
-						</Button>
-					</div>
-				</template>
-			</ListSelectBanner>
-		</ListView>
-		<div v-else class="flex flex-1 items-center justify-center px-5">
-			<EmptyStateLayout name="Quizzes" />
-		</div>
-		<ListFooter
-			v-model="pageLength"
-			class="border-t px-3 py-2 sm:px-5"
-			:options="{
-				rowCount: quizzes.data?.length,
-				totalCount: totalQuizzes.data,
-			}"
-		>
-			<template #right>
-				<div class="flex items-center">
-					<Button
-						v-if="quizzes.hasNextPage"
-						:label="__('Load More')"
-						@click="quizzes.next()"
-					/>
-					<div v-if="quizzes.hasNextPage" class="mx-3 h-[80%] border-l" />
-					<div class="flex items-center gap-1 text-base text-ink-gray-5">
-						<div>{{ quizzes.data?.length || 0 }}</div>
-						<div>{{ __('of') }}</div>
-						<div>{{ totalQuizzes.data || 0 }}</div>
-					</div>
-				</div>
-			</template>
-		</ListFooter>
-	</div>
-	<Dialog
-		v-model:open="showForm"
-		:title="__('Create a Quiz')"
-		size="sm"
-		:actions="[
-			{
-				label: __('Save'),
-				variant: 'solid',
-				onClick({ close }) {
-					insertQuiz(close)
-				},
-			},
-		]"
-	>
-		<template #default>
-			<FormControl
-				v-model="title"
-				:label="__('Title')"
-				type="text"
-				autocomplete="off"
-				@keydown.enter="insertQuiz(() => (showForm = false))"
-			/>
 		</template>
-	</Dialog>
+
+		<template #cell="{ column, row, value }">
+			<Checkbox
+				v-if="column.key == 'show_answers'"
+				:modelValue="Boolean(value)"
+				:disabled="true"
+			/>
+			<div v-else-if="column.key == 'modified'" class="text-sm text-ink-gray-5">
+				{{ value }}
+			</div>
+			<div v-else>{{ value }}</div>
+		</template>
+
+		<template #selection-actions="{ selections }">
+			<span class="sr-only" role="status">{{ deleteAnnouncement }}</span>
+			<Button
+				variant="ghost"
+				:label="deleting ? __('Deleting…') : __('Delete')"
+				:aria-disabled="deleting"
+				:class="deleting ? 'cursor-not-allowed' : ''"
+				@click="deleteQuiz(selections)"
+			>
+				<template #icon>
+					<span
+						class="lucide-trash-2 size-4"
+						:class="deleting ? 'opacity-60' : ''"
+						aria-hidden="true"
+					/>
+				</template>
+			</Button>
+		</template>
+	</ListPage>
 </template>
 <script setup>
 import {
-	Breadcrumbs,
 	Button,
+	call,
+	Checkbox,
 	createListResource,
 	createResource,
-	Dialog,
-	FeatherIcon,
 	FormControl,
-	ListView,
-	ListRows,
-	ListRow,
-	ListRowItem,
-	ListHeader,
-	ListHeaderItem,
-	ListFooter,
-	ListSelectBanner,
 	toast,
 	usePageMeta,
-	Checkbox,
 } from 'frappe-ui'
-import { useRouter, useRoute } from 'vue-router'
-import { computed, inject, onMounted, ref, watch } from 'vue'
+import ListPage from '@/components/Layouts/ListPage.vue'
+import { useRouter } from 'vue-router'
+import { computed, inject, nextTick, onMounted, ref, watch } from 'vue'
 
 import { sessionStore } from '@/stores/session'
-import { sanitizeHTML } from '@/utils'
 import { useTelemetry } from 'frappe-ui/frappe'
-import EmptyStateLayout from '@/components/Layouts/EmptyStateLayout.vue'
-import LayoutHeader from '@/components/Layouts/LayoutHeader.vue'
 
 const { brand } = sessionStore()
 const { capture } = useTelemetry()
 const user = inject('$user')
 const dayjs = inject('$dayjs')
 const router = useRouter()
-const route = useRoute()
 const search = ref('')
 const readOnlyMode = window.read_only_mode
 const quizFilters = ref({})
-const showForm = ref(false)
-const title = ref('')
 
 onMounted(() => {
 	if (
@@ -186,9 +102,6 @@ onMounted(() => {
 		!user.data?.is_evaluator
 	) {
 		router.push({ name: 'Courses' })
-	}
-	if (route.query.new === 'true') {
-		showForm.value = true
 	}
 })
 
@@ -219,6 +132,7 @@ const quizzes = createListResource({
 	auto: true,
 	cache: ['quizzes', user.data?.name],
 	orderBy: 'modified desc',
+	pageLength: 24,
 	transform(data) {
 		return data.map((quiz) => {
 			return {
@@ -232,10 +146,21 @@ const quizzes = createListResource({
 const pageLength = computed({
 	get: () => quizzes.pageLength,
 	set: (value) => {
-		quizzes.update({ pageLength: value })
+		// reload() ignores a new pageLength while start > 0: it refetches the
+		// already loaded rows instead, so paging must be reset for it to apply.
+		quizzes.update({ pageLength: value, start: 0 })
 		quizzes.reload()
 	},
 })
+
+const listOptions = computed(() => ({
+	showTooltip: false,
+	selectable: true,
+	getRowRoute: (row) => ({
+		name: 'QuizForm',
+		params: { quizID: row.name },
+	}),
+}))
 
 const totalQuizzes = createResource({
 	url: 'frappe.client.get_count',
@@ -251,21 +176,13 @@ const totalQuizzes = createResource({
 	},
 })
 
-const validateTitle = () => {
-	title.value = sanitizeHTML(title.value.trim())
-}
-
-const insertQuiz = (close) => {
-	validateTitle()
+const createQuiz = () => {
 	quizzes.insert.submit(
 		{
-			title: title.value,
+			title: __('Untitled Quiz'),
 		},
 		{
 			onSuccess(data) {
-				toast.success(__('Quiz created successfully'))
-				close()
-				title.value = ''
 				capture('quiz_created')
 				router.push({
 					name: 'QuizForm',
@@ -275,18 +192,121 @@ const insertQuiz = (close) => {
 				})
 			},
 			onError(error) {
-				toast.error(__('Error creating quiz: {0}', error.message))
+				toast.error(__('Error creating quiz: {0}').format(error.message))
 			},
 		}
 	)
 }
 
-const deleteQuiz = (selections, unselectAll) => {
-	Array.from(selections).forEach(async (quizName) => {
-		await quizzes.delete.submit(quizName)
+// Frappe puts the readable half of a server error in `messages`; `message`
+// carries a network or client failure. Matches the reading at `totalQuizzes`.
+const errorMessage = (error) => error?.messages?.[0] || error?.message || error
+
+// Drives the trigger's `aria-disabled` as well as the guard below. Not the
+// native `disabled` attribute: that blurs the element it is set on, and the
+// banner is where the keyboard already is.
+const deleting = ref(false)
+
+// The trigger renders as its icon alone — frappe-ui reads `label` into
+// `aria-label` and never into the page — so the in-flight state reaches sighted
+// users as a dimmed icon and everyone else through here. A changed
+// `aria-label` on the focused button is not reliably re-read, and
+// `aria-disabled` says the trigger is inert, not that anything is happening.
+const deleteAnnouncement = computed(() =>
+	deleting.value ? __('Deleting quizzes…') : ''
+)
+
+// One request per row, all in flight together, then a single refetch. Going
+// through `quizzes.delete` refetches the whole page inside every success, so
+// awaiting them in turn was 2N serialised round trips with nothing on screen
+// to say so. `call` carries no shared loading/error state, which is the only
+// thing sequential deletes were protecting.
+const deleteQuiz = async (selections) => {
+	// A run holds the banner up for its whole duration, so a second tap is easy
+	// to make. It would resubmit names that have already gone — every one 404s,
+	// and the run then reports failure for deletes that worked.
+	if (deleting.value) return
+
+	const names = Array.from(selections)
+	if (!names.length) return
+
+	deleting.value = true
+	let results
+	try {
+		results = await Promise.allSettled(
+			names.map((name) =>
+				call('frappe.client.delete', { doctype: 'LMS Quiz', name })
+			)
+		)
+	} finally {
+		deleting.value = false
+	}
+
+	const failed = []
+	let firstError
+	results.forEach((result, index) => {
+		const name = names[index]
+		if (result.status === 'rejected') {
+			failed.push(name)
+			firstError = firstError ?? result.reason
+			console.error('Error deleting quiz:', result.reason)
+			return
+		}
+		// Only the rows that went. The banner's slot offers all-or-nothing, so
+		// this prunes ListView's own selection — the set `toggleRow` deletes
+		// from — one key at a time, and a failed row stays ticked to retry from.
+		selections.delete(name)
 	})
-	unselectAll()
-	toast.success(__('Quizzes deleted successfully'))
+
+	const deleted = names.length - failed.length
+
+	if (deleted) {
+		// Nothing refetches on its own now that `quizzes.delete` is not what
+		// deletes. `reload()` rather than `list.fetch()`: past the first page
+		// the latter appends the refetch onto the rows it just refetched.
+		quizzes.reload()
+		// The heading's count is a separate resource and would otherwise keep
+		// naming the page after the number of quizzes there used to be.
+		totalQuizzes.reload()
+	}
+
+	// Pruning the selection writes the list's own `role="status"`. Two polite
+	// regions mutated in one flush is a dropped or doubled announcement, and
+	// the toast is inserted on a tick of its own, so JS call order alone does
+	// not separate them.
+	await nextTick()
+
+	if (!failed.length) {
+		toast.success(
+			deleted === 1
+				? __('Quiz deleted successfully')
+				: __('{0} quizzes deleted successfully').format(deleted)
+		)
+		return
+	}
+
+	// Errors here ask the moderator to decide what to do next, and there is no
+	// way to re-read a toast that has gone; the close button is already on.
+	const stay = { duration: Infinity }
+	if (!deleted) {
+		toast.error(
+			(names.length === 1
+				? __('Error deleting quiz: {0}')
+				: __('Error deleting quizzes: {0}')
+			).format(errorMessage(firstError)),
+			stay
+		)
+		return
+	}
+
+	toast.error(
+		__('{0} of {1} quizzes deleted; the rest remain selected: {2}').format(
+			deleted,
+			names.length,
+			errorMessage(firstError)
+		),
+		stay
+	)
 }
 
 const quizColumns = computed(() => {
@@ -295,42 +315,46 @@ const quizColumns = computed(() => {
 			label: __('Title'),
 			key: 'title',
 			width: 2,
-			icon: 'file-text',
+			icon: 'lucide-file-text',
 		},
 		{
 			label: __('Total Marks'),
 			key: 'total_marks',
+			hideOnMobile: true,
 			width: 0.5,
-			align: 'center',
-			icon: 'hash',
+			align: 'left',
+			icon: 'lucide-hash',
 		},
 		{
 			label: __('Passing Percentage'),
 			key: 'passing_percentage',
+			hideOnMobile: true,
 			width: 1,
-			align: 'center',
-			icon: 'percent',
+			align: 'left',
+			icon: 'lucide-percent',
 		},
 		{
 			label: __('Max Attempts'),
 			key: 'max_attempts',
+			hideOnMobile: true,
 			width: 0.5,
-			align: 'center',
-			icon: 'repeat',
+			align: 'left',
+			icon: 'lucide-repeat',
 		},
 		{
 			label: __('Show Answers'),
 			key: 'show_answers',
+			hideOnMobile: true,
 			width: 0.5,
-			align: 'center',
-			icon: 'eye',
+			align: 'left',
+			icon: 'lucide-eye',
 		},
 		{
 			label: __('Updated On'),
 			key: 'modified',
 			width: 1,
-			align: 'right',
-			icon: 'clock',
+			align: 'left',
+			icon: 'lucide-clock',
 		},
 	]
 })
