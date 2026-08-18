@@ -1,51 +1,48 @@
 <template>
-	<Dialog
-		v-model="show"
-		:options="{
-			size: '2xl',
-		}"
-	>
-		<template #body>
+	<Dialog v-model:open="show" size="2xl" bare>
+		<template #default>
 			<div class="flex text-base">
 				<div class="flex flex-col w-1/2 p-5">
-					<div class="text-lg font-semibold mb-4">
+					<div class="text-lg-semibold mb-4">
 						{{ event.title }}
 					</div>
 
 					<div class="flex flex-col space-y-4 text-sm text-ink-gray-8">
 						<Tooltip :text="__('Email ID')">
 							<div class="flex items-center gap-x-2 w-fit">
-								<User class="h-4 w-4 stroke-1.5" />
+								<span class="lucide-user h-4 w-4" />
 								<span>
 									{{ event.member }}
 								</span>
 							</div>
 						</Tooltip>
 						<Tooltip :text="__('Course')">
-							<div
+							<a
+								:href="`/lms/courses/${event.course}`"
+								v-external
 								class="flex gap-x-2 w-fit cursor-pointer"
-								@click="openLink('course', event.course)"
 							>
-								<BookOpen class="h-4 w-4 stroke-1.5" />
+								<span class="lucide-book-open h-4 w-4" />
 								<span>
 									{{ event.course_title }}
 								</span>
-							</div>
+							</a>
 						</Tooltip>
 						<Tooltip v-if="event.batch_title" :text="__('Batch')">
-							<div
+							<a
+								:href="`/lms/batches/${event.batch_name}#students`"
+								v-external
 								class="flex gap-x-2 w-fit cursor-pointer"
-								@click="openLink('batch', event.batch_name)"
 							>
-								<Users class="h-4 w-4 stroke-1.5" />
+								<span class="lucide-users h-4 w-4" />
 								<span>
 									{{ event.batch_title }}
 								</span>
-							</div>
+							</a>
 						</Tooltip>
 						<Tooltip :text="__('Date')">
 							<div class="flex items-center gap-x-2 w-fit">
-								<Calendar class="h-4 w-4 stroke-1.5" />
+								<span class="lucide-calendar h-4 w-4" />
 								<span>
 									{{ dayjs(event.date).format('DD MMM YYYY') }}
 								</span>
@@ -53,10 +50,18 @@
 						</Tooltip>
 						<Tooltip :text="__('Time')">
 							<div class="flex items-center gap-x-2 w-fit">
-								<Clock class="h-4 w-4 stroke-1.5" />
+								<span class="lucide-clock h-4 w-4" />
 								<span>
 									{{ formatTime(event.start_time) }} -
 									{{ formatTime(event.end_time) }}
+								</span>
+							</div>
+						</Tooltip>
+						<Tooltip v-if="event.timezone" :text="__('Timezone')">
+							<div class="flex items-center gap-x-2 w-fit">
+								<span class="lucide-globe h-4 w-4" />
+								<span>
+									{{ formatTimezone(event.timezone, event.date) }}
 								</span>
 							</div>
 						</Tooltip>
@@ -68,7 +73,7 @@
 							class="w-full"
 						>
 							<template #prefix>
-								<FileText class="h-4 w-4 stroke-1.5" />
+								<span class="lucide-file-text h-4 w-4" />
 							</template>
 							{{ __('View Certificate') }}
 						</Button>
@@ -78,7 +83,7 @@
 							class="w-full"
 						>
 							<template #prefix>
-								<Video class="h-4 w-4 stroke-1.5" />
+								<span class="lucide-video h-4 w-4" />
 							</template>
 							<span>
 								{{ __('Join Meeting') }}
@@ -107,7 +112,8 @@
 									:disabled="!userIsEvaluator()"
 								/>
 							</div>
-							<Textarea
+							<FormControl
+								type="textarea"
 								v-model="evaluation.summary"
 								:label="__('Summary')"
 								:rows="7"
@@ -122,7 +128,7 @@
 							</Button>
 						</div>
 						<div v-else class="flex flex-col space-y-4 p-5">
-							<Switch
+							<BooleanSwitch
 								size="sm"
 								v-model="certificate.published"
 								:label="__('Published')"
@@ -168,31 +174,21 @@
 </template>
 <script setup>
 import {
-	Dialog,
 	Button,
+	Dialog,
 	FormControl,
-	createResource,
+	Rating,
 	Tabs,
 	Tooltip,
-	Textarea,
+	createResource,
 	toast,
 } from 'frappe-ui'
-import Switch from '@/components/Controls/Switch.vue'
-import {
-	User,
-	Calendar,
-	Clock,
-	Video,
-	BookOpen,
-	FileText,
-	GraduationCap,
-	Users,
-	ClipboardList,
-} from 'lucide-vue-next'
+import BooleanSwitch from '@/components/Controls/BooleanSwitch.vue'
 import { inject, reactive, watch, ref, computed } from 'vue'
 import { formatTime } from '@/utils'
-import Rating from '@/components/Controls/Rating.vue'
+import { formatTimezone } from '@/utils/timezone'
 import Link from '@/components/Controls/Link.vue'
+import { openExternal } from '@/utils/openExternal'
 
 const show = defineModel()
 const user = inject('$user')
@@ -237,7 +233,7 @@ const defaultTemplate = createResource({
 })
 
 const openCallLink = (link) => {
-	window.open(link, '_blank')
+	openExternal(link)
 }
 
 const evaluationResource = createResource({
@@ -378,21 +374,11 @@ watch(show, () => {
 })
 
 const openCertificate = (certificate) => {
-	window.open(
+	openExternal(
 		`/api/method/frappe.utils.print_format.download_pdf?doctype=LMS+Certificate&name=${
 			certificate.name
 		}&format=${encodeURIComponent(certificate.template)}`
 	)
-}
-
-const openLink = (type, name) => {
-	let url = ''
-	if (type === 'course') {
-		url = `/lms/courses/${name}`
-	} else if (type === 'batch') {
-		url = `/lms/batches/${name}#students`
-	}
-	window.open(url, '_blank')
 }
 
 const statusOptions = computed(() => {
@@ -420,14 +406,14 @@ const tabs = computed(() => {
 	const tabsArray = [
 		{
 			label: __('Evaluation'),
-			icon: ClipboardList,
+			icon: 'lucide-clipboard-list',
 		},
 	]
 
 	if (showCertification.value) {
 		tabsArray.push({
 			label: __('Certification'),
-			icon: GraduationCap,
+			icon: 'lucide-graduation-cap',
 		})
 	}
 

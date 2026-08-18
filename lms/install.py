@@ -2,6 +2,7 @@ import frappe
 from frappe.permissions import add_permission, update_permission_property
 
 from lms.lms.api import give_discussions_permission
+from lms.lms.enrollment_constraints import ensure_enrollment_unique_constraints
 
 
 def after_install():
@@ -9,6 +10,15 @@ def after_install():
 	give_discussions_permission()
 	give_user_list_permission()
 	give_event_permission()
+	ensure_batch_enrollment_index()
+	ensure_enrollment_unique_constraints()
+
+
+def ensure_batch_enrollment_index():
+	"""Add the composite (batch, member) index on fresh installs, which skip the patch that adds it; idempotent."""
+	if not frappe.db.table_exists("LMS Batch Enrollment"):
+		return
+	frappe.db.add_index("LMS Batch Enrollment", ["batch", "member"])
 
 
 def after_sync():

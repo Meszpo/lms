@@ -1,5 +1,6 @@
 import type { Ref } from 'vue'
 import type { LMSCourse } from './lms/LMSCourse'
+import type { LMSBatch } from './lms/LMSBatch'
 
 export interface Resource<T = unknown> {
 	data: T
@@ -7,12 +8,15 @@ export interface Resource<T = unknown> {
 	error: unknown
 	doc?: T
 	hasNextPage?: boolean
-	reload(): void
-	fetch(): void
+	reload(): Promise<T>
+	fetch(): Promise<T>
 	next?(): void
-	submit(params?: unknown, opts?: unknown): void
+	// Promise, not void: frappe-ui's submit resolves or REJECTS, and typing it
+	// away is what let bare `resource.submit(...)` statements spread unnoticed —
+	// see utils/resource.ts.
+	submit(params?: unknown, opts?: unknown): Promise<T>
 	update(opts: unknown): void
-	setValue: { submit(values: unknown, opts?: unknown): void }
+	setValue: { submit(values: unknown, opts?: unknown): Promise<T> }
 }
 
 export interface UserInfo {
@@ -60,6 +64,12 @@ export interface CourseDetails
 	quiz_count?: number
 }
 
+export interface BatchDetails extends Omit<LMSBatch, 'instructors'> {
+	instructors: string[]
+	students?: string[]
+	batch_details_raw?: string
+}
+
 export interface CourseReviewInfo {
 	name: string
 	creation: string
@@ -99,7 +109,16 @@ export interface ChapterDetailInput {
 	name?: string
 	title?: string
 	is_scorm_package?: 0 | 1
-	scorm_package?: { file_name: string; file_size: number } | null
+	/**
+	 * build_outline expands this into the File's details only while that File row
+	 * still exists; once it is deleted the raw Course Chapter.scorm_package
+	 * DOCNAME comes through instead. Declaring only the object shape made every
+	 * consumer assume `.file_name` was there.
+	 */
+	scorm_package?:
+		| string
+		| { name?: string; file_name?: string; file_size?: number }
+		| null
 }
 
 export interface CourseFormMeta {

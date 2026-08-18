@@ -13,6 +13,7 @@ from frappe.model.document import Document
 from frappe.utils import add_days, cint, format_datetime, get_time, nowdate
 
 from lms.lms.utils import (
+	format_timezone,
 	generate_slug,
 	get_assignment_details,
 	get_instructors,
@@ -191,7 +192,7 @@ def send_email_notification_for_published_batch(batch):
 		"end_date": batch.end_date,
 		"start_time": batch.start_time,
 		"medium": batch.medium,
-		"timezone": batch.timezone,
+		"timezone": format_timezone(batch.timezone, batch.start_date),
 		"instructors": instructors,
 		"batch_url": frappe.utils.get_url(get_lms_route(f"batches/{batch.name}")),
 	}
@@ -449,7 +450,16 @@ def send_batch_start_reminder():
 	batches = frappe.get_all(
 		"LMS Batch",
 		{"start_date": add_days(nowdate(), 1), "published": 1},
-		["name", "title", "start_date", "start_time", "medium"],
+		[
+			"name",
+			"title",
+			"start_date",
+			"start_time",
+			"medium",
+			"show_live_class",
+			"evaluation",
+			"evaluation_end_date",
+		],
 	)
 
 	for batch in batches:
@@ -459,8 +469,12 @@ def send_batch_start_reminder():
 
 
 def send_mail(batch, student):
-	subject = _("Your batch {0} is starting tomorrow").format(batch.title)
-	template = "batch_start_reminder"
+	if batch.show_live_class:
+		subject = _("Your batch {0} is starting tomorrow").format(batch.title)
+		template = "batch_start_reminder"
+	else:
+		subject = _("You're enrolled in {0} – start whenever you're ready").format(batch.title)
+		template = "batch_start_reminder_recorded"
 
 	args = {
 		"student_name": student.member_name,
@@ -469,6 +483,8 @@ def send_mail(batch, student):
 		"start_time": batch.start_time,
 		"medium": batch.medium,
 		"name": batch.name,
+		"evaluation": batch.evaluation,
+		"evaluation_end_date": batch.evaluation_end_date,
 	}
 
 	frappe.sendmail(
@@ -501,3 +517,22 @@ def has_permission(doc, ptype="read", user=None):
 		return True
 
 	return False
+
+
+def get_permission_query_conditions(user=None):
+	"""List-read counterpart of has_permission above: published, or enrolled."""
+	user = user or frappe.session.user
+	if user == "Administrator":
+		return ""
+
+	if user == "Guest" and not guest_access_allowed():
+		return "1 = 0"
+
+	roles = frappe.get_roles(user)
+	if "Moderator" in roles or "Batch Evaluator" in roles:
+		return ""
+
+	escaped = frappe.db.escape(user)
+	return f"""(`tabLMS Batch`.published = 1 or `tabLMS Batch`.name in (
+		select batch from `tabLMS Batch Enrollment` where member = {escaped}
+	))"""

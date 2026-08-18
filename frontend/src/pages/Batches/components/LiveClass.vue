@@ -2,9 +2,9 @@
 	<div class="p-5">
 		<div
 			v-if="isAdmin() && !hasProviderAccount()"
-			class="flex lg:items-center gap-x-2 mb-5 bg-surface-amber-1 px-3 py-2 rounded-lg text-ink-amber-3"
+			class="flex lg:items-center gap-x-2 mb-5 bg-surface-amber-1 px-3 py-2 rounded-lg text-ink-amber-6"
 		>
-			<AlertCircle class="size-7 md:size-4 stroke-1.5" />
+			<span class="lucide-alert-circle size-7 md:size-4" />
 			<span class="leading-5">
 				{{
 					__(
@@ -15,12 +15,16 @@
 		</div>
 
 		<div class="flex items-center justify-between">
-			<div class="text-lg font-semibold text-ink-gray-9">
+			<div class="text-lg-semibold text-ink-gray-9">
 				{{ __('Live Class') }}
 			</div>
-			<Button v-if="canCreateClass()" @click="openLiveClassModal">
+			<Button
+				v-if="canCreateClass()"
+				data-testid="live-class-add"
+				@click="openLiveClassForm"
+			>
 				<template #prefix>
-					<Plus class="h-4 w-4" />
+					<span class="lucide-plus h-4 w-4" />
 				</template>
 				<span>
 					{{ __('Add') }}
@@ -33,6 +37,7 @@
 		>
 			<div
 				v-for="cls in liveClasses.data"
+				:key="cls.name"
 				class="flex flex-col border rounded-md h-full text-ink-gray-7 hover:border-outline-gray-3 p-3"
 				:class="{
 					'cursor-pointer': isAdmin() && cls.attendees > 0,
@@ -51,13 +56,13 @@
 				</div>
 				<div class="mt-auto space-y-3">
 					<div class="flex items-center gap-x-2">
-						<Calendar class="w-4 h-4 stroke-1.5" />
+						<span class="lucide-calendar w-4 h-4" />
 						<span>
 							{{ dayjs(cls.date).format('DD MMMM YYYY') }}
 						</span>
 					</div>
 					<div class="flex items-center gap-x-2">
-						<Clock class="w-4 h-4 stroke-1.5" />
+						<span class="lucide-clock w-4 h-4" />
 						<span>
 							{{ dayjs(getClassStart(cls)).format('hh:mm A') }} -
 							{{ dayjs(getClassEnd(cls)).format('hh:mm A') }}
@@ -69,20 +74,20 @@
 					>
 						<a
 							v-if="user.data?.is_moderator || user.data?.is_evaluator"
-							:href="cls.start_url || cls.join_url"
-							target="_blank"
+							:href="safeUrl(cls.start_url || cls.join_url)"
+							v-external
 							class="cursor-pointer inline-flex items-center justify-center gap-2 transition-colors focus:outline-none text-ink-gray-8 bg-surface-gray-2 hover:bg-surface-gray-3 active:bg-surface-gray-4 focus-visible:ring focus-visible:ring-outline-gray-3 h-7 text-base px-2 rounded"
 							:class="cls.join_url ? 'w-full' : 'w-1/2'"
 						>
-							<Monitor class="h-4 w-4 stroke-1.5" />
+							<span class="lucide-monitor h-4 w-4" />
 							{{ __('Start') }}
 						</a>
 						<a
-							:href="cls.join_url"
-							target="_blank"
+							:href="safeUrl(cls.join_url)"
+							v-external
 							class="w-full cursor-pointer inline-flex items-center justify-center gap-2 transition-colors focus:outline-none text-ink-gray-8 bg-surface-gray-2 hover:bg-surface-gray-3 active:bg-surface-gray-4 focus-visible:ring focus-visible:ring-outline-gray-3 h-7 text-base px-2 rounded"
 						>
-							<Video class="h-4 w-4 stroke-1.5" />
+							<span class="lucide-video h-4 w-4" />
 							{{ __('Join') }}
 						</a>
 					</div>
@@ -91,8 +96,8 @@
 						:text="__('This class has ended')"
 						placement="right"
 					>
-						<div class="flex items-center gap-x-2 text-ink-amber-3 w-fit">
-							<Info class="w-4 h-4 stroke-1.5" />
+						<div class="flex items-center gap-x-2 text-ink-amber-6 w-fit">
+							<span class="lucide-info w-4 h-4" />
 							<span>
 								{{ __('Ended') }}
 							</span>
@@ -106,16 +111,6 @@
 		</div>
 	</div>
 
-	<LiveClassModal
-		v-if="showLiveClassModal"
-		v-model="showLiveClassModal"
-		:batch="batch.data?.name"
-		:zoomAccount="batch.data?.zoom_account"
-		:googleMeetAccount="batch.data?.google_meet_account"
-		:conferencingProvider="batch.data?.conferencing_provider"
-		v-model:reloadLiveClasses="liveClasses"
-	/>
-
 	<LiveClassAttendance
 		v-if="showAttendance"
 		v-model="showAttendance"
@@ -123,23 +118,21 @@
 	/>
 </template>
 <script setup>
+// TODO(a11y): the class card is click-activated — it opens the attendance
+// modal — but carries nested Start/Join anchors, so it cannot become a
+// <button> without invalid nesting. Reaching it by keyboard needs a dedicated
+// action control, which is a redesign rather than an attribute.
 import { createListResource, Button, Tooltip } from 'frappe-ui'
-import {
-	Plus,
-	Clock,
-	Calendar,
-	Video,
-	Monitor,
-	Info,
-	AlertCircle,
-} from 'lucide-vue-next'
 import { inject, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { formatTime } from '@/utils/'
-import LiveClassModal from '@/components/Modals/LiveClassModal.vue'
+import { openBatchForm } from '@/composables/useBatchForms'
 import LiveClassAttendance from '@/components/Modals/LiveClassAttendance.vue'
+import { safeUrl } from '@/utils/safeUrl'
 
 const user = inject('$user')
-const showLiveClassModal = ref(false)
+const route = useRoute()
+const router = useRouter()
 const dayjs = inject('$dayjs')
 const readOnlyMode = window.read_only_mode
 const showAttendance = ref(false)
@@ -152,8 +145,13 @@ const props = defineProps({
 	},
 })
 
+// The `cache` key is what lets LiveClassForm refresh this list after a create
+// without a prop or a defineModel between them: it looks the instance up by
+// this exact key (getCachedListResource) rather than constructing one, so the
+// options below stay authoritative. Keep the key in step with the form's.
 const liveClasses = createListResource({
 	doctype: 'LMS Live Class',
+	cache: ['liveClasses', props.batch.data?.name],
 	filters: {
 		batch_name: props.batch.data?.name,
 	},
@@ -174,8 +172,8 @@ const liveClasses = createListResource({
 	auto: true,
 })
 
-const openLiveClassModal = () => {
-	showLiveClassModal.value = true
+const openLiveClassForm = () => {
+	openBatchForm(router, 'NewLiveClass', props.batch.data?.name, route.hash)
 }
 
 const hasProviderAccount = () => {

@@ -1,10 +1,5 @@
 <template>
-	<header
-		v-if="!fromLesson"
-		class="sticky flex items-center justify-between top-0 z-10 border-b bg-surface-white px-3 py-2.5 sm:px-5"
-	>
-		<Breadcrumbs :items="breadcrumbs" />
-	</header>
+	<PageHeader v-if="!fromLesson" :breadcrumbs="breadcrumbs" />
 	<div
 		v-if="falconError"
 		class="flex items-center justify-between p-3 text-sm bg-surface-amber-1 text-ink-amber-3"
@@ -14,18 +9,18 @@
 		</span>
 		<Button v-if="user.data?.is_moderator" @click="openSettings('General')">
 			<template #prefix>
-				<Settings class="size-4 stroke-1.5" />
+				<span class="lucide-settings size-4" />
 			</template>
 			{{ __('Settings') }}
 		</Button>
 	</div>
 	<div class="grid grid-cols-2 h-[calc(100vh_-_3rem)]">
 		<div class="border-e py-5 px-8 h-full">
-			<div class="font-semibold mb-2 text-ink-gray-9">
+			<h2 class="font-semibold mb-2 text-ink-gray-9">
 				{{ __('Problem Statement') }}
-			</div>
+			</h2>
 			<div
-				v-html="exercise.doc?.problem_statement"
+				v-safe-html:rich="exercise.doc?.problem_statement"
 				class="ProseMirror prose prose-table:table-fixed prose-td:p-2 prose-th:p-2 prose-td:border prose-th:border prose-td:border-outline-gray-2 prose-th:border-outline-gray-2 prose-td:relative prose-th:relative prose-th:bg-surface-gray-2 prose-sm max-w-none !whitespace-normal"
 			></div>
 		</div>
@@ -54,7 +49,7 @@
 						class="text-ink-gray-9"
 					>
 						<template #prefix>
-							<Play class="size-3" />
+							<span class="lucide-play size-3" />
 						</template>
 						{{ running ? __('Running') : __('Run') }}
 					</Button>
@@ -74,17 +69,17 @@
 					<textarea
 						v-if="error"
 						v-model="errorMessage"
+						:aria-label="__('Compiler Message')"
 						class="font-mono text-ink-red-3 bg-surface-gray-1 border-none text-sm h-32 leading-6"
 						readonly
 					/>
 				</div>
-				<!-- <textarea v-else v-model="output" class="bg-surface-gray-1 border-none text-sm h-28 leading-6" readonly /> -->
 			</div>
 
 			<div ref="testCaseSection" class="p-5">
-				<span class="text-lg font-semibold text-ink-gray-9">
+				<h2 class="text-md font-semibold text-ink-gray-9">
 					{{ __('Test Cases') }}
-				</span>
+				</h2>
 				<div v-if="testCases.length" class="divide-y mt-5">
 					<div
 						v-for="(testCase, index) in testCases"
@@ -105,12 +100,6 @@
 							>
 								{{ testCase.status }}
 							</span>
-							<!-- <span v-if="testCase.status === 'Passed'">
-								<Check class="size-4 text-ink-green-3" />
-							</span>
-							<span v-else>
-								<X class="size-4 text-ink-red-3" />
-							</span> -->
 						</div>
 						<div class="flex items-center justify-between w-[60%]">
 							<div v-if="testCase.input" class="space-y-2">
@@ -148,7 +137,6 @@
 <script setup lang="ts">
 import {
 	Badge,
-	Breadcrumbs,
 	Button,
 	call,
 	createDocumentResource,
@@ -156,14 +144,29 @@ import {
 	usePageMeta,
 } from 'frappe-ui'
 import { computed, inject, onMounted, ref, watch } from 'vue'
-import { Play, X, Check, Settings } from 'lucide-vue-next'
+import PageHeader from '@/components/Layouts/PageHeader.vue'
 import { sessionStore } from '@/stores/session'
 import { useRouter } from 'vue-router'
 import { openSettings } from '@/utils'
 import { useSettings } from '@/stores/settings'
 import { getLmsRoute } from '@/utils/basePath'
+import { provideStudentView } from '@/composables/useStudentView'
 
-const user = inject<any>('$user')
+const realUser = inject<any>('$user')
+
+// Rendered in an iframe from the lesson preview, so provide/inject can't reach
+// this app instance; Student View arrives as a query param instead, exactly as
+// it does for assignment submissions. Unlike AssignmentSubmission, this page
+// reads the instructor flags in its *own* template (the settings button, the
+// view-someone-else's-submission branch), so it uses the masked user itself
+// rather than only providing it to children.
+const studentView = ref(
+	new URLSearchParams(window.location.search).get('studentView') === '1'
+)
+const { mockedUser: user } = provideStudentView(
+	realUser,
+	() => studentView.value
+)
 const code = ref<string | null>('')
 const output = ref<string | null>(null)
 const error = ref<boolean | null>(null)
@@ -299,7 +302,9 @@ watch(
 )
 
 const loadFalcon = () => {
-	if (settings.data) {
+	// An unset livecode_url leaves the default in place rather than building
+	// `undefined/static/livecode.js`.
+	if (settings.data?.livecode_url) {
 		falconURL.value = settings.data.livecode_url
 	}
 	return new Promise((resolve, reject) => {

@@ -7,6 +7,12 @@ export const useSettings = defineStore('settings', () => {
 	const isCommandPaletteOpen = ref(false)
 	const activeTab = ref(null)
 
+	// Settings is the desktop dialog and has no route of its own, so it is
+	// mounted only inside the desktop sidebar's UserDropdown. On a phone nothing
+	// is listening to isSettingsOpen at all, and callers need to know that rather
+	// than flip a flag into the void. Settings.vue owns this.
+	const isSettingsMounted = ref(false)
+
 	const settings = createResource({
 		url: 'lms.lms.api.get_lms_settings',
 		auto: true,
@@ -19,6 +25,13 @@ export const useSettings = defineStore('settings', () => {
 		auto: false,
 	})
 
+	function loadSidebarSettings(force = false) {
+		if (force) return sidebarSettings.reload()
+		if (sidebarSettings.data) return Promise.resolve(sidebarSettings.data)
+		if (sidebarSettings.loading) return sidebarSettings.promise
+		return sidebarSettings.reload()
+	}
+
 	const programs = createResource({
 		url: 'lms.lms.utils.get_programs',
 		auto: false,
@@ -27,9 +40,11 @@ export const useSettings = defineStore('settings', () => {
 	return {
 		activeTab,
 		isSettingsOpen,
+		isSettingsMounted,
 		isCommandPaletteOpen,
 		programs,
 		settings,
 		sidebarSettings,
+		loadSidebarSettings,
 	}
 })

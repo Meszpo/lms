@@ -1,9 +1,6 @@
 <template>
-	<LayoutHeader>
-		<template #left-header>
-			<Breadcrumbs :items="breadcrumbs" />
-		</template>
-		<template #right-header>
+	<PageHeader :breadcrumbs="breadcrumbs">
+		<template #actions>
 			<Button variant="solid" @click="showForm = true">
 				<template #prefix>
 					<Plus class="size-4 stroke-1.5" />
@@ -11,7 +8,7 @@
 				{{ __('Create') }}
 			</Button>
 		</template>
-	</LayoutHeader>
+	</PageHeader>
 
 	<div class="flex min-h-0 flex-1 flex-col pt-5">
 		<div
@@ -110,7 +107,6 @@
 </template>
 <script setup>
 import {
-	Breadcrumbs,
 	Button,
 	createListResource,
 	Dialog,
@@ -131,7 +127,7 @@ import { Plus } from 'lucide-vue-next'
 import { useRouter, useRoute } from 'vue-router'
 import { sessionStore } from '@/stores/session'
 import EmptyStateLayout from '@/components/Layouts/EmptyStateLayout.vue'
-import LayoutHeader from '@/components/Layouts/LayoutHeader.vue'
+import PageHeader from '@/components/Layouts/PageHeader.vue'
 import Link from '@/components/Controls/Link.vue'
 
 const { brand } = sessionStore()

@@ -1,157 +1,64 @@
 <template>
-	<SettingsLayout :title="__(label)" :description="__(description)">
-		<template #header-actions>
-			<Button variant="solid" @click="openNewMember">
-				<template #prefix>
-					<Plus class="h-4 w-4 stroke-1.5" />
-				</template>
-				{{ __('New') }}
-			</Button>
-		</template>
+	<SettingsList
+		:title="__(label)"
+		:description="__(description)"
+		:columns="columns"
+		:rows="memberList"
+		:loading="Boolean(members.loading)"
+		:has-next-page="hasNextPage"
+		v-model:search="search"
+		searchable
+		:search-label="__('Search members')"
+		empty-name="Users"
+		empty-icon="lucide-user"
+		@new="openNewMember"
+		@load-more="fetchMembers()"
+		@row-click="(member) => openProfile(member.username)"
+	>
 		<template #header-bottom>
-			<div class="flex items-center justify-between gap-2 mb-4">
-				<FormControl
-					v-model="search"
-					:placeholder="__('Search')"
-					type="text"
-					:debounce="300"
-					class="w-1/3"
-				>
-					<template #prefix>
-						<Search class="size-4 stroke-1.5 text-ink-gray-5" />
-					</template>
-				</FormControl>
-				<Select v-model="currentRole" class="w-40" :options="roleOptions" />
-			</div>
+			<Select
+				v-model="currentRole"
+				class="w-40"
+				:aria-label="__('Filter by role')"
+				:options="roleOptions"
+			/>
 		</template>
-		<div class="pb-4">
-			<div>
-				<ul class="divide-y divide-outline-gray-modals">
-					<li
-						v-for="member in displayedMembers"
-						class="flex items-center justify-between py-2 cursor-pointer"
-					>
-						<div
-							@click="openProfile(member.username)"
-							class="flex items-center gap-x-3 min-w-0 flex-1"
-						>
-							<Avatar
-								:image="member.user_image"
-								:label="member.full_name"
-								size="xl"
-								class="shrink-0"
-							/>
-							<div class="min-w-0 space-y-1">
-								<div class="truncate text-ink-gray-9">
-									{{ member.full_name }}
-								</div>
-								<div class="truncate text-sm text-ink-gray-7">
-									{{ member.name }}
-								</div>
-							</div>
-						</div>
-						<div
-							v-if="badgeRoles(member.roles).length"
-							class="flex shrink-0 items-center gap-1 ms-3"
-						>
-							<span
-								v-for="role in badgeRoles(member.roles)"
-								:key="role"
-								class="flex items-center text-ink-gray-9 gap-x-1 bg-surface-gray-2 px-2 py-1.5 rounded-md"
-							>
-								<Shield class="size-4 stroke-1.5" />
-								<span class="text-sm">
-									{{ getRole(role) }}
-								</span>
-							</span>
-						</div>
-						<div class="shrink-0 ms-2" @click.stop>
-							<Dropdown
-								:options="getMemberMenuOptions(member)"
-								placement="right"
-							>
-								<Button variant="ghost" class="!px-1.5">
-									<template #icon>
-										<MoreHorizontal class="size-4 stroke-1.5 text-ink-gray-7" />
-									</template>
-								</Button>
-							</Dropdown>
-						</div>
-					</li>
-				</ul>
-				<div
-					v-if="memberList.length && hasNextPage"
-					class="flex justify-center mt-4"
-				>
-					<Button @click="members.reload()">
-						<template #prefix>
-							<RefreshCw class="h-3 w-3 stroke-1.5" />
-						</template>
-						{{ __('Load More') }}
-					</Button>
-				</div>
-			</div>
-		</div>
-	</SettingsLayout>
-	<NewMemberModal
-		v-model="showNewMember"
-		:editMember="memberToEdit"
-		@created="onMemberCreated"
-		@updated="refreshMembers"
-	/>
+	</SettingsList>
 
 	<Dialog
-		v-model="showDeleteDialog"
-		:options="{
-			title: memberToDelete
-				? __('Delete {0}?').format(memberToDelete.full_name)
-				: '',
-			message: __(
-				'This permanently deletes the user account and cannot be undone.'
-			),
-			size: 'sm',
-			actions: [
-				{
-					label: __('Delete'),
-					theme: 'red',
-					variant: 'solid',
-					onClick: confirmDelete,
+		v-model:open="showDeleteDialog"
+		:title="
+			memberToDelete ? __('Delete {0}?').format(memberToDelete.full_name) : ''
+		"
+		:message="
+			__('This permanently deletes the user account and cannot be undone.')
+		"
+		size="sm"
+		:actions="[
+			{
+				label: __('Delete'),
+				theme: 'red',
+				variant: 'solid',
+				onClick: confirmDelete,
+			},
+			{
+				label: __('Cancel'),
+				onClick: () => {
+					showDeleteDialog = false
 				},
-				{
-					label: __('Cancel'),
-					onClick: () => {
-						showDeleteDialog = false
-					},
-				},
-			],
-		}"
+			},
+		]"
 	/>
 </template>
 <script setup lang="ts">
-import {
-	Avatar,
-	Button,
-	call,
-	createResource,
-	Dialog,
-	Dropdown,
-	FormControl,
-	Select,
-	toast,
-} from 'frappe-ui'
+import { call, createResource, Dialog, Select, toast } from 'frappe-ui'
 import { useRouter } from 'vue-router'
-import { ref, computed, watch, inject } from 'vue'
-import {
-	MoreHorizontal,
-	RefreshCw,
-	Plus,
-	Search,
-	Shield,
-} from 'lucide-vue-next'
-import { useOnboarding, useTelemetry } from 'frappe-ui/frappe'
-import type { User } from '@/components/Settings/types'
-import NewMemberModal from '@/components/Modals/NewMemberModal.vue'
-import SettingsLayout from '@/components/Layouts/SettingsLayout.vue'
+import { ref, watch } from 'vue'
+import type { SettingsListColumn } from '@/types'
+import { SETTINGS_PAGE_LENGTH } from '@/composables/useSettingsListResource'
+import { openFormRoute } from '@/composables/useFormRoute'
+import { membersRevision } from '@/stores/members'
+import SettingsList from '@/components/Layouts/SettingsList.vue'
 import { cleanError } from '@/utils'
 
 type Member = {
@@ -176,24 +83,13 @@ const roleOptions = [
 	{ label: __('Evaluator'), value: 'Batch Evaluator' },
 ]
 
-const displayedMembers = computed(() =>
-	memberList.value.filter(
-		(member) =>
-			currentRole.value === 'All' || member.roles?.includes(currentRole.value)
-	)
-)
 const memberList = ref<Member[]>([])
 const hasNextPage = ref(false)
-const showNewMember = ref(false)
-const user = inject<User | null>('$user')
-const { updateOnboardingStep } = useOnboarding('learning')
-const { capture } = useTelemetry()
 
 const showDeleteDialog = ref(false)
 const memberToDelete = ref<Member | null>(null)
-const memberToEdit = ref<Member | null>(null)
 
-const props = defineProps({
+defineProps({
 	label: {
 		type: String,
 		required: true,
@@ -204,26 +100,65 @@ const props = defineProps({
 	},
 })
 
+// No frappe-ui `cache` key on purpose: makeParams closes over this component's
+// refs, and createResource hands back the FIRST instance for a key without
+// rebinding those closures, so a remounted panel would inherit a resource still
+// writing into the unmounted one's state. The member forms announce saves
+// through `membersRevision` instead (see stores/members.ts).
 const members = createResource({
 	url: 'lms.lms.api.get_members',
-	makeParams: () => {
-		return {
-			search: search.value,
-			start: start.value,
-		}
-	},
-	onSuccess(data: Member[]) {
-		memberList.value = memberList.value.concat(data)
-		start.value = start.value + 20
-		hasNextPage.value = data.length === 20
-	},
-	auto: true,
+	makeParams: () => ({
+		search: search.value,
+		start: start.value,
+		role: currentRole.value,
+	}),
+	auto: false,
 })
 
+// createResource carries no request sequence and aborts nothing, so two calls
+// in flight both resolve and both append: a role change mid-request would show
+// one filter's page under another's, and over-advance `start` past rows nobody
+// ever saw. Each call takes a token and a superseded response is dropped.
+let requestToken = 0
+
+const fetchMembers = async () => {
+	const token = ++requestToken
+	const data = (await members.reload()) as Member[] | null
+	if (token !== requestToken || !data) return
+	memberList.value = memberList.value.concat(data)
+	// Paged by what the server actually returned, not by the constant. An
+	// exact-equality check hides Load More outright the moment the two
+	// disagree, and stepping `start` by the constant would then skip rows.
+	start.value = start.value + data.length
+	hasNextPage.value = data.length >= SETTINGS_PAGE_LENGTH
+}
+
+// The search goes to the server with start reset, so a match past the first
+// page is reachable without pressing Load More first.
 const refreshMembers = () => {
 	memberList.value = []
 	start.value = 0
-	members.reload()
+	return fetchMembers()
+}
+
+watch([search, currentRole], () => {
+	refreshMembers()
+})
+
+// A member form saved while this panel is still mounted behind it (the desktop
+// dialog) has no other way to reach the list. On a phone the panel unmounts, so
+// the fresh mount's own first fetch already covers it.
+watch(membersRevision, () => {
+	refreshMembers()
+})
+
+refreshMembers()
+
+const roleLabels: Record<string, string> = {
+	'LMS Student': __('Student'),
+	'Course Creator': __('Instructor'),
+	Moderator: __('Moderator'),
+	'Batch Evaluator': __('Evaluator'),
 }
 
 const openProfile = (username: string) => {
@@ -236,43 +171,61 @@ const openProfile = (username: string) => {
 	})
 }
 
-const onMemberCreated = (data: any) => {
-	if (user?.data?.is_system_manager) updateOnboardingStep('invite_students')
-	capture('user_added')
-	refreshMembers()
-}
-
-watch(search, () => {
-	refreshMembers()
-})
-
-const badgeRoles = (roles?: string[]) =>
-	(roles || []).filter((role) => role !== 'LMS Student')
-
-const getRole = (role: string) => {
-	const map: Record<string, string> = {
-		'LMS Student': 'Student',
-		'Course Creator': 'Instructor',
-		Moderator: 'Moderator',
-		'Batch Evaluator': 'Evaluator',
-	}
-	return map[role]
-}
-
+// The settings dialog is deliberately left open behind these: opening a member
+// form is not a "leave settings" action the way openProfile() is, and the form
+// renders as a second dialog on top, the way the delete confirmation below
+// already stacks.
 const openEditMember = (member: Member) => {
-	memberToEdit.value = member
-	showNewMember.value = true
+	openFormRoute(router, {
+		name: 'MemberForm',
+		params: { memberID: member.name },
+	})
 }
 
 const openNewMember = () => {
-	memberToEdit.value = null
-	showNewMember.value = true
+	openFormRoute(router, { name: 'MemberForm', params: { memberID: 'new' } })
 }
 
 const openDeleteDialog = (member: Member) => {
 	memberToDelete.value = member
 	showDeleteDialog.value = true
 }
+
+const columns: SettingsListColumn[] = [
+	{
+		key: 'member',
+		label: __('User'),
+		type: 'stacked',
+		primary: (row) => row.full_name,
+		secondary: (row) => row.name,
+		avatar: (row) => ({ image: row.user_image, label: row.full_name }),
+	},
+	{
+		key: 'roles',
+		label: __('Roles'),
+		type: 'badge',
+		badges: (row) =>
+			((row.roles || []) as string[])
+				.filter((role) => roleLabels[role])
+				.map((role) => ({ label: roleLabels[role], theme: 'gray' as const })),
+	},
+	{
+		key: 'actions',
+		type: 'actions',
+		ariaLabel: (row) => __('Actions for {0}').format(row.full_name),
+		options: (row) => [
+			{
+				label: __('Edit member'),
+				onClick: () => openEditMember(row as Member),
+			},
+			{
+				label: __('Delete user'),
+				theme: 'red',
+				onClick: () => openDeleteDialog(row as Member),
+			},
+		],
+	},
+]
 
 const confirmDelete = async (close: () => void) => {
 	if (!memberToDelete.value) return
@@ -287,16 +240,4 @@ const confirmDelete = async (close: () => void) => {
 	}
 	close?.()
 }
-
-const getMemberMenuOptions = (member: Member) => [
-	{
-		label: __('Edit member'),
-		onClick: () => openEditMember(member),
-	},
-	{
-		label: __('Delete user'),
-		theme: 'red',
-		onClick: () => openDeleteDialog(member),
-	},
-]
 </script>

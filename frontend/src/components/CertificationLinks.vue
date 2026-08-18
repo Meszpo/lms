@@ -5,7 +5,7 @@
 		class=""
 	>
 		<template #prefix>
-			<GraduationCap class="size-4 stroke-1.5" />
+			<span class="lucide-graduation-cap size-4" />
 		</template>
 		{{ __('View Certificate') }}
 	</Button>
@@ -29,7 +29,7 @@
 		>
 			<Button class="w-full">
 				<template #prefix>
-					<GraduationCap class="size-4 stroke-1.5" />
+					<span class="lucide-graduation-cap size-4" />
 				</template>
 				{{ __('Get Certified') }}
 			</Button>
@@ -45,7 +45,7 @@
 		>
 			<Button class="w-full">
 				<template #prefix>
-					<GraduationCap class="size-4 stroke-1.5" />
+					<span class="lucide-graduation-cap size-4" />
 				</template>
 				{{ __('Get Certified') }}
 			</Button>
@@ -55,8 +55,8 @@
 <script setup lang="ts">
 import { Button, createResource } from 'frappe-ui'
 import { inject } from 'vue'
-import { GraduationCap } from 'lucide-vue-next'
-import type { CertificationInfo, Resource, SessionUser } from '@/types/api'
+import type { CertificationInfo, Resource, SessionUser } from '@/types'
+import { openExternal } from '@/utils/openExternal'
 
 const user = inject<SessionUser>('$user')!
 
@@ -77,7 +77,7 @@ const certification = createResource({
 const downloadCertificate = () => {
 	const cert = certification.data?.certificate
 	if (!cert) return
-	window.open(
+	openExternal(
 		`/api/method/frappe.utils.print_format.download_pdf?doctype=LMS+Certificate&name=${
 			cert.name
 		}&format=${encodeURIComponent(cert.template)}`

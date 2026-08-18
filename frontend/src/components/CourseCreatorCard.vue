@@ -1,15 +1,13 @@
 <template>
 	<div v-if="instructors?.length" class="border-2 rounded-md p-5">
-		<div
-			class="uppercase text-ink-gray-5 text-xs font-semibold tracking-wider mb-4"
-		>
+		<div class="uppercase text-ink-gray-5 text-xs-semibold tracking-wider mb-4">
 			{{ headerLabel }}
 		</div>
 
 		<template v-if="instructors.length === 1">
 			<router-link
 				:to="profileLink(instructors[0])"
-				class="flex items-center gap-3"
+				class="flex items-center gap-4"
 			>
 				<UserAvatar :user="instructors[0]" size="2xl" />
 				<div class="min-w-0">
@@ -20,7 +18,7 @@
 			</router-link>
 			<div
 				v-if="hasBio(instructors[0].bio)"
-				v-html="renderBio(instructors[0].bio)"
+				v-safe-html:bio="decodeEntities(instructors[0].bio || '')"
 				class="ProseMirror prose prose-sm max-w-none text-p-sm text-ink-gray-7 leading-6 mt-4 line-clamp-3"
 			></div>
 		</template>
@@ -29,7 +27,7 @@
 			<router-link
 				v-if="focused"
 				:to="profileLink(focused)"
-				class="flex items-center gap-3"
+				class="flex items-center gap-4"
 			>
 				<UserAvatar :user="focused" size="2xl" />
 				<div class="min-w-0">
@@ -40,13 +38,13 @@
 			</router-link>
 			<div
 				v-if="hasBio(focused?.bio)"
-				v-html="renderBio(focused?.bio)"
+				v-safe-html:bio="decodeEntities(focused?.bio || '')"
 				class="ProseMirror prose prose-sm max-w-none text-p-sm text-ink-gray-7 leading-6 mt-4 line-clamp-3"
 			></div>
 
 			<div class="mt-4 pt-4 border-t border-outline-gray-2">
 				<div
-					class="uppercase text-ink-gray-5 text-xs font-semibold tracking-wider mb-3"
+					class="uppercase text-ink-gray-5 text-xs-semibold tracking-wider mb-3"
 				>
 					{{ __('Also teaching') }}
 				</div>
@@ -56,6 +54,7 @@
 							v-for="(instructor, idx) in visiblePeers"
 							:key="instructor.username || instructor.name || idx"
 							type="button"
+							:aria-label="instructor.full_name"
 							class="rounded-full hover:-translate-y-0.5 transition -ms-1.5 first:ms-0"
 							@click="focusInstructor(instructor)"
 						>
@@ -64,7 +63,8 @@
 						<button
 							v-if="hiddenPeerCount > 0"
 							type="button"
-							class="-ms-1.5 flex items-center justify-center size-6 rounded-full bg-surface-gray-3 text-xs font-medium text-ink-gray-7 hover:bg-surface-gray-4 transition"
+							:aria-label="__('Show more instructors')"
+							class="-ms-1.5 flex items-center justify-center size-6 rounded-full bg-surface-gray-3 text-xs-medium text-ink-gray-7 hover:bg-surface-gray-4 transition"
 							@click="expanded = true"
 						>
 							+{{ hiddenPeerCount }}
@@ -81,10 +81,9 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import DOMPurify from 'dompurify'
 import UserAvatar from '@/components/UserAvatar.vue'
 import { decodeEntities, htmlToText } from '@/utils'
-import type { CourseInstructorInfo } from '@/types/api'
+import type { CourseInstructorInfo } from '@/types'
 
 const props = defineProps<{
 	instructors: CourseInstructorInfo[]
@@ -145,25 +144,6 @@ const headerLabel = computed<string>(() => {
 function hasBio(bio?: string | null): boolean {
 	if (!bio) return false
 	return htmlToText(bio).trim().length > 0 || /<img\b/i.test(bio)
-}
-
-function renderBio(bio?: string | null): string {
-	return DOMPurify.sanitize(decodeEntities(bio || ''), {
-		ALLOWED_TAGS: [
-			'b',
-			'i',
-			'em',
-			'strong',
-			'a',
-			'p',
-			'br',
-			'ul',
-			'ol',
-			'li',
-			'img',
-		],
-		ALLOWED_ATTR: ['href', 'target', 'rel', 'src'],
-	})
 }
 
 function profileLink(instructor: CourseInstructorInfo) {
