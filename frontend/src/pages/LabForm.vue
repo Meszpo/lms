@@ -1,11 +1,11 @@
 <template>
 	<header
-		class="sticky top-0 z-10 flex items-center justify-between border-b bg-surface-white px-3 py-2.5 sm:px-5"
+		class="sticky top-0 z-10 flex items-center justify-between border-b bg-surface-base px-3 py-2.5 sm:px-5"
 	>
 		<Breadcrumbs :items="breadcrumbs" />
 		<div class="flex items-center gap-x-2">
 			<Badge v-if="isDirty" theme="orange">{{ __('Not Saved') }}</Badge>
-			<Button variant="solid" @click="save" :loading="saving">{{ __('Save') }}</Button>
+			<Button variant="solid" @click="save" :loading="saving" :disabled="!isDirty">{{ __('Save') }}</Button>
 		</div>
 	</header>
 
@@ -112,13 +112,14 @@
 			<div v-if="lab.roles?.length" class="space-y-1">
 				<div v-for="(r, idx) in lab.roles" :key="idx">
 					<div class="flex items-center gap-2">
-						<Autocomplete
+						<Combobox
 							class="flex-1"
-							:model-value="r.role"
+							:modelValue="r.role"
+							:query="roleQueries[idx] || ''"
 							:options="roleOptionsFor(idx)"
 							:placeholder="__('e.g. Sales User, Accounts User')"
 							@update:query="(q) => (roleQueries[idx] = q)"
-							@update:model-value="(opt) => setRoleValue(idx, opt?.value || '')"
+							@update:modelValue="(val) => setRoleValue(idx, val || '')"
 						/>
 						<Check
 							v-if="r.role?.trim() && externalRoles && !isDuplicateRole(idx) && !isUnknownRole(idx)"
@@ -161,7 +162,7 @@
 					<div class="flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-sm font-semibold"
 						:class="(step.item_type || 'Step') === 'Text'
 							? 'bg-surface-gray-3 text-ink-gray-5'
-							: 'bg-surface-blue-1 text-ink-blue-3'"
+							: 'bg-surface-blue-2 text-ink-blue-6'"
 					>
 						{{ (step.item_type || 'Step') === 'Text' ? '¶' : (idx + 1) }}
 					</div>
@@ -173,9 +174,21 @@
 								{{ __('text') }}
 							</span>
 						</div>
-						<div v-if="step.instructions" class="text-xs text-ink-gray-5 mt-0.5 truncate">
-							{{ step.instructions.replace(/\+\[[^\]]+\]\([^)]+\)/g, '[chip]').replace(/<[^>]+>/g, '').substring(0, 80) }}
+						<div v-if="step.instructions" class="text-xs text-ink-gray-5 mt-0.5"
+							:class="expandedSteps[idx] ? 'whitespace-pre-line' : 'truncate'"
+						>
+							{{ expandedSteps[idx]
+								? step.instructions.replace(/\+\[[^\]]+\]\([^)]+\)/g, '[chip]').replace(/<[^>]+>/g, '')
+								: step.instructions.replace(/\+\[[^\]]+\]\([^)]+\)/g, '[chip]').replace(/<[^>]+>/g, '').substring(0, 80) }}
 						</div>
+						<button
+							v-if="step.instructions?.length > 80"
+							type="button"
+							class="text-xs text-ink-blue-6 hover:underline mt-0.5"
+							@click.stop="expandedSteps[idx] = !expandedSteps[idx]"
+						>
+							{{ expandedSteps[idx] ? __('Show less') : __('Show more') }}
+						</button>
 					</div>
 					<Button variant="ghost" size="sm" @click.stop="removeStep(idx)">
 						<X class="w-3.5 h-3.5 stroke-1.5 text-ink-gray-5" />
@@ -191,6 +204,12 @@
 				<div class="text-lg font-semibold text-ink-gray-9">
 					{{ __('Evaluation Criteria') }}
 					<span class="text-base font-normal text-ink-gray-5 ml-1">({{ lab.evaluation_criteria?.length || 0 }})</span>
+					<span v-if="lab.evaluation_criteria?.length" class="text-sm font-normal ml-2"
+						:class="totalCriteriaPoints === 0 ? 'text-red-500' : 'text-ink-gray-5'"
+					>
+						{{ __('Total: {0} pts', [totalCriteriaPoints]) }}
+						<span v-if="totalCriteriaPoints === 0">{{ __('— cannot pass with 0 points') }}</span>
+					</span>
 				</div>
 				<Button @click="openCriterionModal()">
 					<template #prefix><Plus class="w-4 h-4" /></template>
@@ -210,7 +229,7 @@
 							<span>{{ criterion.doctype_to_check }}</span>
 							<span v-if="criterion.comparison_operator">{{ criterion.comparison_operator }}</span>
 							<span v-if="criterion.expected_value" class="font-mono">{{ criterion.expected_value }}</span>
-							<span class="font-medium text-ink-blue-3">{{ criterion.points }} pts</span>
+							<span class="font-medium text-ink-blue-6">{{ criterion.points }} pts</span>
 						</div>
 					</div>
 					<Button variant="ghost" size="sm" @click.stop="removeCriterion(idx)">
@@ -226,17 +245,17 @@
 	<Dialog
 		v-model="showStepModal"
 		:options="{
-			title: editingStepIdx !== null ? __('Edit Step') : __('Add Step'),
-			size: 'lg',
+			title: isNewStep ? __('Add Step') : __('Edit Step'),
+			size: 'xl',
 			actions: [
-				{ label: __('Save'), variant: 'solid', onClick({ close }) { saveStep(close) } },
+				{ label: __('Close'), variant: 'solid', onClick({ close }) { close() } },
 			],
 		}"
 	>
 		<template #body-content>
-			<div class="space-y-4">
+			<div v-if="activeStep" class="space-y-4">
 				<FormControl
-					v-model="stepForm.item_type"
+					v-model="activeStep.item_type"
 					:label="__('Item Type')"
 					type="select"
 					:options="[
@@ -245,7 +264,7 @@
 					]"
 					@change="isDirty = true"
 				/>
-				<FormControl v-model="stepForm.title" :label="__('Title')" :required="true" />
+				<FormControl v-model="activeStep.title" :label="__('Title')" :required="true" @input="isDirty = true" />
 
 				<div>
 					<div class="flex items-center justify-between mb-1">
@@ -269,20 +288,21 @@
 						<Info class="size-3.5 shrink-0 mt-0.5 text-ink-gray-4" />
 						<span>
 							{{ __('Use') }}
-							<code class="bg-surface-white rounded px-1 font-mono text-ink-blue-3">+[label](value)</code>
+							<code class="bg-surface-base rounded px-1 font-mono text-ink-blue-6">+[label](value)</code>
 							{{ __('to embed a copyable chip.') }}
 						</span>
 					</div>
 					<textarea
 						ref="instructionsRef"
-						v-model="stepForm.instructions"
-						rows="7"
+						v-model="activeStep.instructions"
+						rows="12"
 						class="w-full rounded border border-outline-gray-2 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-outline-blue-3"
 						:placeholder="__('Describe what the student should do.\nUse +[Copy label](value) to add inline copyable values.')"
+						@input="isDirty = true"
 					/>
 				</div>
 
-				<div v-if="stepForm.item_type !== 'Text'" class="border-t pt-4">
+				<div v-if="activeStep.item_type !== 'Text'" class="border-t pt-4">
 					<div class="text-sm font-medium text-ink-gray-7 mb-3">
 						{{ __('Navigation') }}
 						<span class="font-normal text-ink-gray-4 text-xs ml-1">{{ __('(optional — opens a pre-filled form in the lab system window)') }}</span>
@@ -291,20 +311,22 @@
 						<div>
 							<label class="block text-sm font-medium text-ink-gray-7 mb-1">{{ __('Path') }}</label>
 							<input
-								v-model="stepForm.autocomplete_nav_path"
+								v-model="activeStep.autocomplete_nav_path"
 								type="text"
 								class="w-full rounded border border-outline-gray-2 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-outline-blue-3"
 								placeholder="/app/sales-invoice/new-sales-invoice-1"
+								@input="isDirty = true"
 							/>
 						</div>
 						<div>
 							<label class="block text-sm font-medium text-ink-gray-7 mb-1">{{ __('Params (JSON)') }}</label>
 							<PlaceholderChips :tokens="navTokens" @insert="insertAtCursor" class="mb-2" />
 							<textarea
-								v-model="stepForm.autocomplete_nav_params"
+								v-model="activeStep.autocomplete_nav_params"
 								rows="2"
 								class="w-full rounded border border-outline-gray-2 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-outline-blue-3"
 								:placeholder='`{\"company\": \"{company_name}\", \"customer\": \"ACME\"}`'
+								@input="isDirty = true"
 							/>
 						</div>
 					</div>
@@ -317,48 +339,54 @@
 	<Dialog
 		v-model="showCriterionModal"
 		:options="{
-			title: editingCriterionIdx !== null ? __('Edit Criterion') : __('Add Criterion'),
-			size: 'lg',
+			title: isNewCriterion ? __('Add Criterion') : __('Edit Criterion'),
+			size: 'xl',
 			actions: [
-				{ label: __('Save'), variant: 'solid', onClick({ close }) { saveCriterion(close) } },
+				{ label: __('Close'), variant: 'solid', onClick({ close }) { close() } },
 			],
 		}"
 	>
 		<template #body-content>
-			<div class="space-y-4">
+			<div v-if="activeCriterion" class="space-y-4">
 				<FormControl
-					v-model="criterionForm.criterion_name"
+					v-model="activeCriterion.criterion_name"
 					:label="__('Criterion Name')"
 					:required="true"
+					@input="isDirty = true"
 				/>
 				<div class="grid grid-cols-2 gap-3">
 					<FormControl
-						v-model="criterionForm.doctype_to_check"
+						v-model="activeCriterion.doctype_to_check"
 						:label="__('DocType to Check')"
 						:description="__('e.g. Sales Invoice')"
 						:required="true"
+						@input="isDirty = true"
 					/>
 					<FormControl
-						v-model="criterionForm.points"
+						v-model="activeCriterion.points"
 						:label="__('Points')"
 						type="number"
+						@input="isDirty = true"
 					/>
 					<FormControl
-						v-model="criterionForm.comparison_operator"
+						v-model="activeCriterion.comparison_operator"
 						:label="__('Comparison')"
 						type="select"
 						:options="['Exists', 'Equals', 'Contains', 'Greater Than', 'Less Than']"
+						@change="isDirty = true"
 					/>
 					<FormControl
-						v-model="criterionForm.field_to_check"
+						v-model="activeCriterion.field_to_check"
 						:label="__('Field to Check')"
 						:description="__('Leave empty to check record existence only')"
+						@input="isDirty = true"
 					/>
 					<FormControl
-						v-model="criterionForm.expected_value"
+						v-model="activeCriterion.expected_value"
 						:label="__('Expected Value')"
 						:description="__('Required for Equals/Contains/Greater/Less comparisons')"
 						class="col-span-1"
+						@input="isDirty = true"
 					/>
 				</div>
 				<div>
@@ -370,20 +398,22 @@
 					<!-- Placeholder chips for criterion -->
 					<PlaceholderChips :tokens="criterionTokens" @insert="insertAtCursor" class="mb-2" />
 					<textarea
-						v-model="criterionForm.filters"
+						v-model="activeCriterion.filters"
 						rows="3"
 						class="w-full rounded border border-outline-gray-2 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-outline-blue-3"
 						:placeholder='`[[\"company\", \"=\", \"{company_name}\"]]`'
+						@input="isDirty = true"
 					/>
 					<p class="text-xs text-ink-gray-5 mt-1">
 						{{ __('Standard Frappe filter format. Placeholders above are replaced at evaluation time.') }}
 					</p>
 				</div>
 				<FormControl
-					v-model="criterionForm.description"
+					v-model="activeCriterion.description"
 					:label="__('Description')"
 					type="textarea"
-					:rows="2"
+					:rows="3"
+					@input="isDirty = true"
 				/>
 			</div>
 		</template>
@@ -394,6 +424,7 @@ import {
 	Breadcrumbs,
 	Button,
 	Badge,
+	Combobox,
 	Dialog,
 	FormControl,
 	createDocumentResource,
@@ -525,7 +556,6 @@ function applyMdFormat(cmd) {
 }
 import { sessionStore } from '@/stores/session'
 import Link from '@/components/Controls/Link.vue'
-import Autocomplete from '@/components/Controls/Autocomplete.vue'
 
 // Inline PlaceholderChips component
 const PlaceholderChips = defineComponent({
@@ -544,7 +574,7 @@ const PlaceholderChips = defineComponent({
 							type: 'button',
 							title: t.description,
 							class:
-								'inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-mono bg-surface-gray-2 hover:bg-surface-blue-1 text-ink-gray-7 hover:text-ink-blue-3 border border-outline-gray-2 hover:border-outline-blue-2 transition-colors cursor-pointer',
+								'inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-mono bg-surface-gray-2 hover:bg-surface-blue-2 text-ink-gray-7 hover:text-ink-blue-6 border border-outline-gray-2 hover:border-outline-blue-2 transition-colors cursor-pointer',
 							onClick: () => emit('insert', t.value),
 						},
 						[
@@ -651,25 +681,6 @@ function insertAtCursor(token) {
 	}
 }
 
-const stepForm = reactive({
-	item_type: 'Step',
-	title: '',
-	instructions: '',
-	autocomplete_nav_path: '',
-	autocomplete_nav_params: '',
-})
-
-const criterionForm = reactive({
-	criterion_name: '',
-	doctype_to_check: '',
-	filters: '',
-	field_to_check: '',
-	expected_value: '',
-	comparison_operator: 'Exists',
-	points: 10,
-	description: '',
-})
-
 onMounted(() => {
 	if (!user.data?.is_moderator && !user.data?.is_instructor) {
 		router.push({ name: 'Courses' })
@@ -742,95 +753,107 @@ const save = () => {
 	)
 }
 
-// Step helpers
+// Step helpers — edits write straight into lab.value.steps, no in-modal Save needed.
+// The top-level "Save" button still submits the whole lab doc, unchanged.
+const isNewStep = ref(false)
+
+const activeStep = computed(() => {
+	const idx = editingStepIdx.value
+	return idx !== null ? lab.value?.steps?.[idx] : null
+})
+
 const openStepModal = (idx = null) => {
-	editingStepIdx.value = idx
-	if (idx !== null) {
-		const s = lab.value.steps[idx]
-		Object.assign(stepForm, {
-			item_type: s.item_type || 'Step',
-			title: s.title || '',
-			instructions: s.instructions || '',
-			autocomplete_nav_path: s.autocomplete_nav_path || '',
-			autocomplete_nav_params: s.autocomplete_nav_params || '',
+	if (idx === null) {
+		if (!lab.value.steps) lab.value.steps = []
+		lab.value.steps.push({
+			doctype: 'LMS Lab Step',
+			item_type: 'Step',
+			title: '',
+			instructions: '',
+			autocomplete_nav_path: '',
+			autocomplete_nav_params: '',
 		})
+		idx = lab.value.steps.length - 1
+		isNewStep.value = true
 	} else {
-		Object.assign(stepForm, {
-			item_type: 'Step', title: '', instructions: '',
-			autocomplete_nav_path: '', autocomplete_nav_params: '',
-		})
+		isNewStep.value = false
 	}
+	editingStepIdx.value = idx
 	showStepModal.value = true
 }
 
-const saveStep = (close) => {
-	if (!stepForm.title.trim()) {
-		toast.warning(__('Step title is required'))
-		return
+// Discard an empty row left behind by opening "Add Step" and closing without typing a title.
+watch(showStepModal, (val, wasOpen) => {
+	if (wasOpen && !val) {
+		const idx = editingStepIdx.value
+		const row = idx !== null ? lab.value?.steps?.[idx] : null
+		if (isNewStep.value && row && !row.title?.trim()) {
+			lab.value.steps.splice(idx, 1)
+		}
+		editingStepIdx.value = null
+		isNewStep.value = false
 	}
-	const row = { ...stepForm, doctype: 'LMS Lab Step' }
-	if (editingStepIdx.value !== null) {
-		const existing = lab.value.steps[editingStepIdx.value]
-		lab.value.steps[editingStepIdx.value] = { ...existing, ...row }
-	} else {
-		if (!lab.value.steps) lab.value.steps = []
-		lab.value.steps.push(row)
-	}
-	isDirty.value = true
-	close()
-}
+})
 
 const removeStep = (idx) => {
 	lab.value.steps.splice(idx, 1)
 	isDirty.value = true
 }
 
-// Criterion helpers
+const expandedSteps = reactive({})
+
+// Criterion helpers — edits write straight into lab.value.evaluation_criteria, no in-modal Save needed.
+const isNewCriterion = ref(false)
+
+const activeCriterion = computed(() => {
+	const idx = editingCriterionIdx.value
+	return idx !== null ? lab.value?.evaluation_criteria?.[idx] : null
+})
+
 const openCriterionModal = (idx = null) => {
-	editingCriterionIdx.value = idx
-	if (idx !== null) {
-		const c = lab.value.evaluation_criteria[idx]
-		Object.assign(criterionForm, {
-			criterion_name: c.criterion_name || '',
-			doctype_to_check: c.doctype_to_check || '',
-			filters: c.filters || '',
-			field_to_check: c.field_to_check || '',
-			expected_value: c.expected_value || '',
-			comparison_operator: c.comparison_operator || 'Exists',
-			points: c.points ?? 10,
-			description: c.description || '',
+	if (idx === null) {
+		if (!lab.value.evaluation_criteria) lab.value.evaluation_criteria = []
+		lab.value.evaluation_criteria.push({
+			doctype: 'LMS Lab Evaluation Criterion',
+			criterion_name: '',
+			doctype_to_check: '',
+			filters: '',
+			field_to_check: '',
+			expected_value: '',
+			comparison_operator: 'Exists',
+			points: 10,
+			description: '',
 		})
+		idx = lab.value.evaluation_criteria.length - 1
+		isNewCriterion.value = true
 	} else {
-		Object.assign(criterionForm, {
-			criterion_name: '', doctype_to_check: '', filters: '',
-			field_to_check: '', expected_value: '', comparison_operator: 'Exists',
-			points: 10, description: '',
-		})
+		isNewCriterion.value = false
 	}
+	editingCriterionIdx.value = idx
 	showCriterionModal.value = true
 }
 
-const saveCriterion = (close) => {
-	if (!criterionForm.criterion_name.trim() || !criterionForm.doctype_to_check.trim()) {
-		toast.warning(__('Criterion name and DocType are required'))
-		return
+// Discard an empty row left behind by opening "Add Criterion" and closing without filling it in.
+watch(showCriterionModal, (val, wasOpen) => {
+	if (wasOpen && !val) {
+		const idx = editingCriterionIdx.value
+		const row = idx !== null ? lab.value?.evaluation_criteria?.[idx] : null
+		if (isNewCriterion.value && row && !row.criterion_name?.trim() && !row.doctype_to_check?.trim()) {
+			lab.value.evaluation_criteria.splice(idx, 1)
+		}
+		editingCriterionIdx.value = null
+		isNewCriterion.value = false
 	}
-	const row = { ...criterionForm, doctype: 'LMS Lab Evaluation Criterion' }
-	if (editingCriterionIdx.value !== null) {
-		const existing = lab.value.evaluation_criteria[editingCriterionIdx.value]
-		lab.value.evaluation_criteria[editingCriterionIdx.value] = { ...existing, ...row }
-	} else {
-		if (!lab.value.evaluation_criteria) lab.value.evaluation_criteria = []
-		lab.value.evaluation_criteria.push(row)
-	}
-	isDirty.value = true
-	close()
-}
+})
 
 const removeCriterion = (idx) => {
 	lab.value.evaluation_criteria.splice(idx, 1)
 	isDirty.value = true
 }
+
+const totalCriteriaPoints = computed(() =>
+	(lab.value?.evaluation_criteria || []).reduce((sum, c) => sum + (Number(c.points) || 0), 0)
+)
 
 // Role helpers — verify role names against the external system
 const externalRoles = ref(null) // null = not loaded/unavailable, Array = role names on the external system
@@ -888,7 +911,18 @@ const roleQueries = reactive({})
 const roleOptionsFor = (idx) => {
 	const options = (externalRoles.value || []).map((name) => ({ label: name, value: name }))
 	const query = (roleQueries[idx] || '').trim()
-	if (query && !options.some((o) => o.value.toLowerCase() === query.toLowerCase())) {
+	const current = (lab.value.roles[idx]?.role || '').trim()
+	// Combobox resyncs its internal `query` to the committed value's label on
+	// every mount/close (see displayValue watcher in frappe-ui's Combobox.vue),
+	// which flows back here via @update:query. Without this guard, that resync
+	// would synthesize a "Use '<value>'" option whose `value` matches the
+	// already-selected role but whose `label` doesn't — flipping displayValue
+	// between the two forever (infinite reactive update loop).
+	if (
+		query &&
+		query.toLowerCase() !== current.toLowerCase() &&
+		!options.some((o) => o.value.toLowerCase() === query.toLowerCase())
+	) {
 		options.unshift({ label: __('Use "{0}"').format(query), value: query })
 	}
 	return options

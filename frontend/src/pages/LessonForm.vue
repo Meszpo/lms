@@ -118,7 +118,7 @@
 						</label>
 						<span
 							v-if="lesson.lab_id"
-							class="text-xs bg-surface-blue-1 text-ink-blue-3 px-2 py-0.5 rounded-full"
+							class="text-xs bg-surface-blue-2 text-ink-blue-6 px-2 py-0.5 rounded-full"
 						>
 							{{ lesson.lab_id }}
 						</span>

@@ -32,7 +32,7 @@
 			class="flex-1 overflow-y-auto px-5"
 		>
 			<ListHeader
-				class="mb-2 grid items-center rounded-none border-b bg-surface-white p-2"
+				class="mb-2 grid items-center rounded-none border-b bg-surface-base p-2"
 			>
 				<ListHeaderItem :item="item" v-for="item in columns" />
 			</ListHeader>

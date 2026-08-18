@@ -50,7 +50,7 @@
 </template>
 <script setup>
 import { Button, FormControl, call, toast } from 'frappe-ui'
-import Switch from '@/components/Controls/Switch.vue'
+import Switch from '@/components/Controls/BooleanSwitch.vue'
 import { computed, reactive, watch, ref } from 'vue'
 import { cleanError } from '@/utils'
 import SettingsLayout from '@/components/Layouts/SettingsLayout.vue'

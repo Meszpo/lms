@@ -171,6 +171,36 @@
 							</ul>
 						</div>
 
+						<div
+							v-if="assessmentProgress.data?.labs?.length"
+							class="border border-outline-elevation-2 rounded-lg px-3 pt-3 h-fit"
+						>
+							<div>
+								<div class="text-ink-gray-5 mb-5">
+									{{ __('Lab Progress') }}
+								</div>
+							</div>
+							<ul class="list-none">
+								<li
+									v-for="(lab, index) in assessmentProgress.data.labs"
+									:key="`${lab.lab}-${index}`"
+									class="flex justify-between items-center text-sm py-2 my-1 gap-x-2"
+								>
+									<div class="min-w-0">
+										{{ lab.lab_title }}
+									</div>
+									<div class="flex items-center gap-x-2 shrink-0">
+										<span class="text-xs text-ink-gray-7">
+											{{ Math.ceil(lab.percentage) }}%
+										</span>
+										<Badge :theme="getAssessmentStatusTheme(lab.status)">
+											{{ lab.status }}
+										</Badge>
+									</div>
+								</li>
+							</ul>
+						</div>
+
 					</div>
 				</div>
 			</div>
