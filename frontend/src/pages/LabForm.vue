@@ -1,685 +1,461 @@
 <template>
-	<header
-		class="sticky top-0 z-10 flex items-center justify-between border-b bg-surface-base px-3 py-2.5 sm:px-5"
-	>
-		<Breadcrumbs :items="breadcrumbs" />
-		<div class="flex items-center gap-x-2">
+	<PageHeader :breadcrumbs="breadcrumbs">
+		<template #actions>
 			<Badge v-if="isDirty" theme="orange">{{ __('Not Saved') }}</Badge>
-			<Button variant="solid" @click="save" :loading="saving" :disabled="!isDirty">{{ __('Save') }}</Button>
-		</div>
-	</header>
+			<HeaderButton
+				:label="__('Test Lab')"
+				icon="lucide-flask-conical"
+				:disabled="!lab?.title"
+				@click="openTestLab"
+			/>
+			<Button variant="solid" @click="save" :loading="saving" :disabled="!isDirty">
+				{{ __('Save') }}
+			</Button>
+		</template>
+	</PageHeader>
 
-	<div v-if="lab" class="py-5">
-		<!-- Details -->
-		<div class="px-10 pb-6 space-y-5 border-b mb-6">
-			<div class="text-lg font-semibold text-ink-gray-9">{{ __('Details') }}</div>
-			<div class="grid grid-cols-2 gap-5">
+	<div v-if="lab" class="grid flex-1 grid-cols-1 lg:min-h-0 lg:grid-cols-[1fr,320px]">
+		<!-- Main column -->
+		<div class="flex min-w-0 flex-col lg:min-h-0 lg:overflow-y-auto">
+			<!-- Tab stepper -->
+			<div class="flex border-b px-5 gap-1 shrink-0">
+				<button
+					v-for="tab in tabs"
+					:key="tab.id"
+					type="button"
+					class="px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors"
+					:class="activeTab === tab.id
+						? 'border-outline-blue-3 text-ink-blue-6'
+						: 'border-transparent text-ink-gray-5 hover:text-ink-gray-7'"
+					@click="activeTab = tab.id"
+				>
+					{{ tab.label }}
+					<span v-if="tab.count != null" class="text-ink-gray-4 font-normal ml-1">({{ tab.count }})</span>
+				</button>
+			</div>
+
+			<div class="p-5 space-y-5">
+				<!-- BASICS TAB -->
+				<template v-if="activeTab === 'basics'">
+					<div class="flex items-center justify-between">
+						<h2 class="text-lg font-semibold text-ink-gray-9">{{ __('Lab Description') }}</h2>
+						<Dropdown :options="templateOptions">
+							<Button size="sm" variant="outline">
+								<template #prefix><LayoutTemplate class="w-3.5 h-3.5" /></template>
+								{{ __('Apply template') }}
+							</Button>
+						</Dropdown>
+					</div>
+					<p class="text-xs text-ink-gray-5 -mt-3">{{ __('Displayed on the course page. Supports Markdown formatting.') }}</p>
+					<div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+						<div class="border rounded-lg overflow-hidden flex flex-col bg-surface-base">
+							<div class="flex items-center gap-1 border-b bg-surface-gray-1 px-2 py-1.5 shrink-0 flex-wrap">
+								<span class="text-xs font-medium text-ink-gray-5 mr-1">{{ __('Markdown') }}</span>
+								<button
+									v-for="fmt in DESC_FMT_BUTTONS"
+									:key="fmt.cmd"
+									type="button"
+									:title="fmt.title"
+									class="px-2 py-0.5 text-xs rounded hover:bg-surface-gray-3 text-ink-gray-7 font-medium transition-colors border border-transparent hover:border-outline-gray-2"
+									@mousedown.prevent="applyDescFormat(fmt.cmd)"
+								>{{ fmt.label }}</button>
+							</div>
+							<textarea
+								ref="descTextareaRef"
+								v-model="descMarkdown"
+								rows="12"
+								class="flex-1 px-3 py-2 text-sm font-mono text-ink-gray-8 bg-surface-base focus:outline-none resize-none leading-relaxed"
+								:placeholder="__('# Heading\n\nWrite lab description in **Markdown**…')"
+								@input="isDirty = true"
+							></textarea>
+						</div>
+						<div class="border rounded-lg overflow-hidden flex flex-col bg-surface-base">
+							<div class="flex items-center border-b bg-surface-gray-1 px-2 py-1.5 shrink-0">
+								<span class="text-xs font-medium text-ink-gray-5">{{ __('Preview') }}</span>
+							</div>
+							<div
+								class="flex-1 px-4 py-3 text-sm text-ink-gray-8 leading-relaxed overflow-auto lab-desc-preview bg-surface-base"
+								v-html="renderedDesc || `<span class='text-ink-gray-4 text-xs italic'>${__('Nothing to preview yet…')}</span>`"
+							></div>
+						</div>
+					</div>
+
+					<!-- User Roles -->
+					<div class="border-t pt-5">
+						<div class="flex items-center justify-between mb-3">
+							<div>
+								<div class="text-lg font-semibold text-ink-gray-9">{{ __('User Roles') }}</div>
+								<p class="text-xs text-ink-gray-5 mt-0.5">{{ __('Roles assigned to the student on the external system. Defaults to System Manager.') }}</p>
+								<p v-if="lab.lab_connection && !externalRoles && !loadingExternalRoles" class="text-xs text-ink-amber-6 mt-0.5">
+									{{ __('Could not verify roles against the external system — check the names manually.') }}
+								</p>
+							</div>
+							<Button size="sm" @click="addRole">
+								<template #prefix><Plus class="w-3.5 h-3.5" /></template>
+								{{ __('Add Role') }}
+							</Button>
+						</div>
+						<div v-if="lab.roles?.length" class="space-y-1">
+							<div v-for="(r, idx) in lab.roles" :key="idx">
+								<div class="flex items-center gap-2">
+									<Combobox
+										class="flex-1"
+										:modelValue="r.role"
+										:query="roleQueries[idx] || ''"
+										:options="roleOptionsFor(idx)"
+										:placeholder="__('e.g. Sales User, Accounts User')"
+										@update:query="(q) => (roleQueries[idx] = q)"
+										@update:modelValue="(val) => setRoleValue(idx, val || '')"
+									/>
+									<Check
+										v-if="r.role?.trim() && externalRoles && !isDuplicateRole(idx) && !isUnknownRole(idx)"
+										class="w-3.5 h-3.5 text-green-500 shrink-0"
+									/>
+									<Button variant="ghost" size="sm" @click="removeRole(idx)">
+										<X class="w-3.5 h-3.5 stroke-1.5 text-ink-gray-5" />
+									</Button>
+								</div>
+								<p v-if="isDuplicateRole(idx)" class="text-xs text-red-500 mt-0.5">
+									{{ __('This role is assigned more than once.') }}
+								</p>
+								<p v-else-if="isUnknownRole(idx)" class="text-xs text-red-500 mt-0.5">
+									{{ __('Role not found on the external system.') }}
+								</p>
+							</div>
+						</div>
+						<p v-else class="text-sm text-ink-gray-5 italic">{{ __('No roles configured — will use System Manager.') }}</p>
+					</div>
+				</template>
+
+				<!-- STEPS TAB -->
+				<template v-if="activeTab === 'steps'">
+					<div class="flex items-center justify-between mb-2">
+						<h2 class="text-lg font-semibold text-ink-gray-9">{{ __('Steps') }}</h2>
+						<Button @click="addStep">
+							<template #prefix><Plus class="w-4 h-4" /></template>
+							{{ __('Add Step') }}
+						</Button>
+					</div>
+					<Draggable
+						v-if="lab.steps?.length"
+						v-model="lab.steps"
+						item-key="name"
+						handle=".step-drag-handle"
+						@end="onStepsReordered"
+						class="space-y-2"
+					>
+						<template #item="{ element: step, index: idx }">
+							<div class="border rounded-lg bg-surface-gray-1 overflow-hidden">
+								<div
+									class="flex items-start gap-2 p-3 cursor-pointer hover:bg-surface-gray-2"
+									@click="toggleExpandedStep(idx)"
+								>
+									<GripVertical class="step-drag-handle w-4 h-4 text-ink-gray-4 shrink-0 mt-0.5 cursor-grab" />
+									<div
+										class="flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-sm font-semibold"
+										:class="(step.item_type || 'Step') === 'Text'
+											? 'bg-surface-gray-3 text-ink-gray-5'
+											: 'bg-surface-blue-2 text-ink-blue-6'"
+									>
+										{{ (step.item_type || 'Step') === 'Text' ? '¶' : stepNumber(idx) }}
+									</div>
+									<div class="flex-1 min-w-0">
+										<div class="flex items-center gap-2">
+											<span class="font-medium text-ink-gray-9 text-sm">{{ step.title || __('(untitled)') }}</span>
+											<span v-if="(step.item_type || 'Step') === 'Text'"
+												class="px-1.5 py-0.5 text-[10px] font-semibold uppercase rounded bg-surface-gray-2 text-ink-gray-5">
+												{{ __('text') }}
+											</span>
+										</div>
+										<div v-if="step.instructions && expandedStepIdx !== idx" class="text-xs text-ink-gray-5 mt-0.5 truncate">
+											{{ stripInstructions(step.instructions) }}
+										</div>
+									</div>
+									<div class="flex items-center gap-1 shrink-0">
+										<Button variant="ghost" size="sm" :title="__('Duplicate')" @click.stop="duplicateStep(idx)">
+											<Copy class="w-3.5 h-3.5 text-ink-gray-5" />
+										</Button>
+										<Button variant="ghost" size="sm" @click.stop="removeStep(idx)">
+											<X class="w-3.5 h-3.5 stroke-1.5 text-ink-gray-5" />
+										</Button>
+										<ChevronDown
+											class="w-4 h-4 text-ink-gray-4 transition-transform"
+											:class="{ 'rotate-180': expandedStepIdx === idx }"
+										/>
+									</div>
+								</div>
+								<div v-if="expandedStepIdx === idx" class="px-4 pb-4">
+									<LabStepEditor
+										:step="step"
+										:step-idx="idx"
+										:external-doctypes="externalDoctypes"
+										@dirty="isDirty = true"
+									/>
+								</div>
+							</div>
+						</template>
+					</Draggable>
+					<p v-else class="text-sm text-ink-gray-5">{{ __('No steps added yet.') }}</p>
+				</template>
+
+				<!-- EVALUATION TAB -->
+				<template v-if="activeTab === 'evaluation'">
+					<div class="flex items-center justify-between mb-2">
+						<div>
+							<h2 class="text-lg font-semibold text-ink-gray-9">{{ __('Evaluation Criteria') }}</h2>
+							<p class="text-sm mt-0.5"
+								:class="totalCriteriaPoints === 0 ? 'text-red-500' : 'text-ink-gray-5'"
+							>
+								{{ __('Total: {0} pts').format(totalCriteriaPoints) }}
+								<span v-if="totalCriteriaPoints === 0">{{ __('— cannot pass with 0 points') }}</span>
+							</p>
+						</div>
+						<Button @click="addCriterion">
+							<template #prefix><Plus class="w-4 h-4" /></template>
+							{{ __('Add Criterion') }}
+						</Button>
+					</div>
+					<Draggable
+						v-if="lab.evaluation_criteria?.length"
+						v-model="lab.evaluation_criteria"
+						item-key="name"
+						handle=".criterion-drag-handle"
+						@end="isDirty = true"
+						class="space-y-2"
+					>
+						<template #item="{ element: criterion, index: idx }">
+							<div class="border rounded-lg bg-surface-gray-1 overflow-hidden">
+								<div
+									class="flex items-start gap-2 p-3 cursor-pointer hover:bg-surface-gray-2"
+									@click="toggleExpandedCriterion(idx)"
+								>
+									<GripVertical class="criterion-drag-handle w-4 h-4 text-ink-gray-4 shrink-0 mt-1 cursor-grab" />
+									<div class="flex-1 min-w-0">
+										<div class="font-medium text-ink-gray-9 text-sm">{{ criterion.criterion_name || __('(unnamed)') }}</div>
+										<div class="text-xs text-ink-gray-5 mt-0.5 flex flex-wrap gap-2">
+											<span>{{ criterion.doctype_to_check }}</span>
+											<span v-if="criterion.comparison_operator">{{ criterion.comparison_operator }}</span>
+											<span class="font-medium text-ink-blue-6">{{ criterion.points }} pts</span>
+										</div>
+									</div>
+									<div class="flex items-center gap-1 shrink-0">
+										<Button variant="ghost" size="sm" :title="__('Duplicate')" @click.stop="duplicateCriterion(idx)">
+											<Copy class="w-3.5 h-3.5 text-ink-gray-5" />
+										</Button>
+										<Button variant="ghost" size="sm" @click.stop="removeCriterion(idx)">
+											<X class="w-3.5 h-3.5 stroke-1.5 text-ink-gray-5" />
+										</Button>
+										<ChevronDown
+											class="w-4 h-4 text-ink-gray-4 transition-transform"
+											:class="{ 'rotate-180': expandedCriterionIdx === idx }"
+										/>
+									</div>
+								</div>
+								<div v-if="expandedCriterionIdx === idx" class="px-4 pb-4">
+									<LabCriterionEditor
+										:criterion="criterion"
+										:lab-connection="lab.lab_connection"
+										:external-doctypes="externalDoctypes"
+										@dirty="isDirty = true"
+									/>
+								</div>
+							</div>
+						</template>
+					</Draggable>
+					<p v-else class="text-sm text-ink-gray-5">{{ __('No evaluation criteria added yet.') }}</p>
+				</template>
+
+				<!-- PREVIEW TAB -->
+				<template v-if="activeTab === 'preview'">
+					<div class="flex items-center justify-between mb-4">
+						<h2 class="text-lg font-semibold text-ink-gray-9">{{ __('Preview') }}</h2>
+						<Button variant="outline" size="sm" :loading="loadingPreview" @click="loadPreviewData">
+							{{ __('Refresh preview data') }}
+						</Button>
+					</div>
+					<LabPreviewPanel :lab="lab" :preview-data="previewData" />
+				</template>
+			</div>
+		</div>
+
+		<!-- Sidebar -->
+		<div class="order-first border-b p-5 space-y-6 lg:order-none lg:overflow-y-auto lg:border-b-0 lg:border-s bg-surface-gray-1/50">
+			<div class="space-y-4">
+				<h2 class="text-base font-semibold text-ink-gray-9">{{ __('Details') }}</h2>
 				<FormControl
 					v-model="lab.title"
 					:label="__('Title')"
+					variant="outline"
 					:required="true"
 					@input="isDirty = true"
 				/>
-				<Link
-					v-model="lab.lab_connection"
-					:label="__('Lab Connection')"
-					doctype="LMS Lab Connection"
-					@update:modelValue="isDirty = true"
-				/>
+				<div>
+					<Link
+						v-model="lab.lab_connection"
+						:label="__('Lab Connection')"
+						doctype="LMS Lab Connection"
+						@update:modelValue="onConnectionChange"
+					/>
+					<div v-if="lab.lab_connection" class="flex items-center gap-1.5 mt-1">
+						<span
+							class="w-2 h-2 rounded-full shrink-0"
+							:class="{
+								'bg-ink-gray-3': connectionStatus === null,
+								'bg-green-500': connectionStatus === true,
+								'bg-red-500': connectionStatus === false,
+							}"
+						/>
+						<span class="text-xs text-ink-gray-5">
+							{{ connectionStatus === true ? __('Connection OK') : connectionStatus === false ? __('Connection failed') : __('Checking…') }}
+						</span>
+					</div>
+				</div>
 				<FormControl
 					v-model="lab.passing_percentage"
 					:label="__('Passing Percentage')"
 					type="number"
-					@input="isDirty = true"
-				/>
-				<FormControl
-					v-model="lab.max_attempts"
-					:label="__('Max Attempts')"
-					type="number"
-					:description="__('0 = unlimited')"
-					@input="isDirty = true"
-				/>
-				<FormControl
-					v-model="lab.max_session_minutes"
-					:label="__('Session Duration (minutes)')"
-					type="number"
-					@input="isDirty = true"
-				/>
-				<FormControl
-					v-model="lab.company_prefix"
-					:label="__('Company Prefix')"
-					:description="__('Prefix used for generated company names')"
+					variant="outline"
 					@input="isDirty = true"
 				/>
 			</div>
-		</div>
 
-		<!-- Lab Description -->
-		<div class="px-10 pb-6 border-b mb-6">
-			<div class="text-lg font-semibold text-ink-gray-9 mb-1">{{ __('Lab Description') }}</div>
-			<p class="text-xs text-ink-gray-5 mb-3">{{ __('Displayed on the course page. Supports Markdown formatting.') }}</p>
-			<div class="grid grid-cols-2 gap-4">
-				<!-- Editor -->
-				<div class="border rounded-lg overflow-hidden flex flex-col">
-					<div class="flex items-center gap-1 border-b bg-surface-gray-1 px-2 py-1.5 shrink-0">
-						<span class="text-xs font-medium text-ink-gray-5 mr-1">{{ __('Markdown') }}</span>
-						<button
-							v-for="fmt in descFmtButtons"
-							:key="fmt.cmd"
-							type="button"
-							:title="fmt.title"
-							class="px-2 py-0.5 text-xs rounded hover:bg-surface-gray-3 text-ink-gray-7 font-medium transition-colors border border-transparent hover:border-outline-gray-2"
-							@mousedown.prevent="applyDescFormat(fmt.cmd)"
-						>{{ fmt.label }}</button>
-					</div>
-					<textarea
-						ref="descTextareaRef"
-						v-model="descMarkdown"
-						rows="10"
-						class="flex-1 px-3 py-2 text-sm font-mono text-ink-gray-8 focus:outline-none resize-none leading-relaxed"
-						:placeholder="__('# Heading\n\nWrite lab description in **Markdown**…')"
+			<details class="group">
+				<summary class="text-sm font-semibold text-ink-gray-9 cursor-pointer list-none flex items-center justify-between">
+					{{ __('Advanced settings') }}
+					<ChevronDown class="w-4 h-4 text-ink-gray-4 group-open:rotate-180 transition-transform" />
+				</summary>
+				<div class="mt-4 space-y-4">
+					<FormControl
+						v-model="lab.max_attempts"
+						:label="__('Max Attempts')"
+						type="number"
+						variant="outline"
+						:description="__('0 = unlimited')"
 						@input="isDirty = true"
-					></textarea>
+					/>
+					<FormControl
+						v-model="lab.max_session_minutes"
+						:label="__('Session Duration (minutes)')"
+						type="number"
+						variant="outline"
+						@input="isDirty = true"
+					/>
+					<FormControl
+						v-model="lab.company_prefix"
+						:label="__('Company Prefix')"
+						variant="outline"
+						:description="__('Prefix used for generated company names')"
+						@input="isDirty = true"
+					/>
 				</div>
-				<!-- Preview -->
-				<div class="border rounded-lg overflow-hidden flex flex-col">
-					<div class="flex items-center border-b bg-surface-gray-1 px-2 py-1.5 shrink-0">
-						<span class="text-xs font-medium text-ink-gray-5">{{ __('Preview') }}</span>
-					</div>
-					<div
-						class="flex-1 px-4 py-3 text-sm text-ink-gray-8 leading-relaxed overflow-auto lab-desc-preview"
-						v-html="renderedDesc || `<span class='text-ink-gray-4 text-xs italic'>${__('Nothing to preview yet…')}</span>`"
-					></div>
-				</div>
-			</div>
-		</div>
+			</details>
 
-		<!-- User Roles -->
-		<div class="px-10 pb-6 border-b mb-6">
-			<div class="flex items-center justify-between mb-3">
-				<div>
-					<div class="text-lg font-semibold text-ink-gray-9">{{ __('User Roles') }}</div>
-					<p class="text-xs text-ink-gray-5 mt-0.5">{{ __('Roles assigned to the student on the external system. Defaults to System Manager.') }}</p>
-					<p v-if="lab.lab_connection && !externalRoles && !loadingExternalRoles" class="text-xs text-amber-600 mt-0.5">
-						{{ __('Could not verify roles against the external system — check the names manually.') }}
-					</p>
-				</div>
-				<Button size="sm" @click="addRole">
-					<template #prefix><Plus class="w-3.5 h-3.5" /></template>
-					{{ __('Add Role') }}
-				</Button>
+			<div class="border-t pt-4">
+				<h3 class="text-sm font-semibold text-ink-gray-9 mb-2">{{ __('Checklist') }}</h3>
+				<LabValidationChecklist
+					:lab="lab"
+					:connection-ok="connectionStatus"
+					:total-criteria-points="totalCriteriaPoints"
+				/>
 			</div>
-			<div v-if="lab.roles?.length" class="space-y-1">
-				<div v-for="(r, idx) in lab.roles" :key="idx">
-					<div class="flex items-center gap-2">
-						<Combobox
-							class="flex-1"
-							:modelValue="r.role"
-							:query="roleQueries[idx] || ''"
-							:options="roleOptionsFor(idx)"
-							:placeholder="__('e.g. Sales User, Accounts User')"
-							@update:query="(q) => (roleQueries[idx] = q)"
-							@update:modelValue="(val) => setRoleValue(idx, val || '')"
-						/>
-						<Check
-							v-if="r.role?.trim() && externalRoles && !isDuplicateRole(idx) && !isUnknownRole(idx)"
-							class="w-3.5 h-3.5 text-green-500 shrink-0"
-						/>
-						<Button variant="ghost" size="sm" @click="removeRole(idx)">
-							<X class="w-3.5 h-3.5 stroke-1.5 text-ink-gray-5" />
-						</Button>
-					</div>
-					<p v-if="isDuplicateRole(idx)" class="text-xs text-red-500 mt-0.5">
-						{{ __('This role is assigned more than once.') }}
-					</p>
-					<p v-else-if="isUnknownRole(idx)" class="text-xs text-red-500 mt-0.5">
-						{{ __('Role not found on the external system.') }}
-					</p>
-				</div>
-			</div>
-			<p v-else class="text-sm text-ink-gray-5 italic">{{ __('No roles configured — will use System Manager.') }}</p>
-		</div>
-
-		<!-- Steps -->
-		<div class="px-10 pb-6 border-b mb-6">
-			<div class="flex items-center justify-between mb-4">
-				<div class="text-lg font-semibold text-ink-gray-9">
-					{{ __('Steps') }}
-					<span class="text-base font-normal text-ink-gray-5 ml-1">({{ lab.steps?.length || 0 }})</span>
-				</div>
-				<Button @click="openStepModal()">
-					<template #prefix><Plus class="w-4 h-4" /></template>
-					{{ __('Add Step') }}
-				</Button>
-			</div>
-			<div v-if="lab.steps?.length" class="space-y-2">
-				<div
-					v-for="(step, idx) in lab.steps"
-					:key="step.name || idx"
-					class="flex items-start gap-3 p-3 border rounded-lg bg-surface-gray-1 hover:bg-surface-gray-2 cursor-pointer"
-					@click="openStepModal(idx)"
-				>
-					<div class="flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-sm font-semibold"
-						:class="(step.item_type || 'Step') === 'Text'
-							? 'bg-surface-gray-3 text-ink-gray-5'
-							: 'bg-surface-blue-2 text-ink-blue-6'"
-					>
-						{{ (step.item_type || 'Step') === 'Text' ? '¶' : (idx + 1) }}
-					</div>
-					<div class="flex-1 min-w-0">
-						<div class="flex items-center gap-2">
-							<span class="font-medium text-ink-gray-9 text-sm">{{ step.title || __('(untitled)') }}</span>
-							<span v-if="(step.item_type || 'Step') === 'Text'"
-								class="px-1.5 py-0.5 text-[10px] font-semibold uppercase rounded bg-surface-gray-2 text-ink-gray-5">
-								{{ __('text') }}
-							</span>
-						</div>
-						<div v-if="step.instructions" class="text-xs text-ink-gray-5 mt-0.5"
-							:class="expandedSteps[idx] ? 'whitespace-pre-line' : 'truncate'"
-						>
-							{{ expandedSteps[idx]
-								? step.instructions.replace(/\+\[[^\]]+\]\([^)]+\)/g, '[chip]').replace(/<[^>]+>/g, '')
-								: step.instructions.replace(/\+\[[^\]]+\]\([^)]+\)/g, '[chip]').replace(/<[^>]+>/g, '').substring(0, 80) }}
-						</div>
-						<button
-							v-if="step.instructions?.length > 80"
-							type="button"
-							class="text-xs text-ink-blue-6 hover:underline mt-0.5"
-							@click.stop="expandedSteps[idx] = !expandedSteps[idx]"
-						>
-							{{ expandedSteps[idx] ? __('Show less') : __('Show more') }}
-						</button>
-					</div>
-					<Button variant="ghost" size="sm" @click.stop="removeStep(idx)">
-						<X class="w-3.5 h-3.5 stroke-1.5 text-ink-gray-5" />
-					</Button>
-				</div>
-			</div>
-			<p v-else class="text-sm text-ink-gray-5">{{ __('No steps added yet.') }}</p>
-		</div>
-
-		<!-- Evaluation Criteria -->
-		<div class="px-10 pb-6">
-			<div class="flex items-center justify-between mb-4">
-				<div class="text-lg font-semibold text-ink-gray-9">
-					{{ __('Evaluation Criteria') }}
-					<span class="text-base font-normal text-ink-gray-5 ml-1">({{ lab.evaluation_criteria?.length || 0 }})</span>
-					<span v-if="lab.evaluation_criteria?.length" class="text-sm font-normal ml-2"
-						:class="totalCriteriaPoints === 0 ? 'text-red-500' : 'text-ink-gray-5'"
-					>
-						{{ __('Total: {0} pts', [totalCriteriaPoints]) }}
-						<span v-if="totalCriteriaPoints === 0">{{ __('— cannot pass with 0 points') }}</span>
-					</span>
-				</div>
-				<Button @click="openCriterionModal()">
-					<template #prefix><Plus class="w-4 h-4" /></template>
-					{{ __('Add Criterion') }}
-				</Button>
-			</div>
-			<div v-if="lab.evaluation_criteria?.length" class="space-y-2">
-				<div
-					v-for="(criterion, idx) in lab.evaluation_criteria"
-					:key="criterion.name || idx"
-					class="flex items-start gap-3 p-3 border rounded-lg bg-surface-gray-1 hover:bg-surface-gray-2 cursor-pointer"
-					@click="openCriterionModal(idx)"
-				>
-					<div class="flex-1 min-w-0">
-						<div class="font-medium text-ink-gray-9 text-sm">{{ criterion.criterion_name || __('(unnamed)') }}</div>
-						<div class="text-xs text-ink-gray-5 mt-0.5 flex gap-3">
-							<span>{{ criterion.doctype_to_check }}</span>
-							<span v-if="criterion.comparison_operator">{{ criterion.comparison_operator }}</span>
-							<span v-if="criterion.expected_value" class="font-mono">{{ criterion.expected_value }}</span>
-							<span class="font-medium text-ink-blue-6">{{ criterion.points }} pts</span>
-						</div>
-					</div>
-					<Button variant="ghost" size="sm" @click.stop="removeCriterion(idx)">
-						<X class="w-3.5 h-3.5 stroke-1.5 text-ink-gray-5" />
-					</Button>
-				</div>
-			</div>
-			<p v-else class="text-sm text-ink-gray-5">{{ __('No evaluation criteria added yet.') }}</p>
 		</div>
 	</div>
-
-	<!-- Step Modal -->
-	<Dialog
-		v-model="showStepModal"
-		:options="{
-			title: isNewStep ? __('Add Step') : __('Edit Step'),
-			size: 'xl',
-			actions: [
-				{ label: __('Close'), variant: 'solid', onClick({ close }) { close() } },
-			],
-		}"
-	>
-		<template #body-content>
-			<div v-if="activeStep" class="space-y-4">
-				<FormControl
-					v-model="activeStep.item_type"
-					:label="__('Item Type')"
-					type="select"
-					:options="[
-						{ label: __('Step — numbered task with checkbox'), value: 'Step' },
-						{ label: __('Text — free text / section header'), value: 'Text' },
-					]"
-					@change="isDirty = true"
-				/>
-				<FormControl v-model="activeStep.title" :label="__('Title')" :required="true" @input="isDirty = true" />
-
-				<div>
-					<div class="flex items-center justify-between mb-1">
-						<label class="block text-sm font-medium text-ink-gray-7">{{ __('Instructions') }}</label>
-					</div>
-					<!-- Markdown toolbar -->
-					<div class="mb-2 flex items-center gap-1 rounded-md bg-surface-gray-2 px-2 py-1.5 flex-wrap">
-						<button
-							v-for="fmt in mdFmtButtons"
-							:key="fmt.cmd"
-							type="button"
-							:title="fmt.title"
-							class="px-2 py-0.5 text-xs rounded hover:bg-surface-gray-4 text-ink-gray-7 font-medium transition-colors border border-transparent hover:border-outline-gray-2"
-							@mousedown.prevent="applyMdFormat(fmt.cmd)"
-						>{{ fmt.label }}</button>
-						<span class="mx-1 text-outline-gray-3 text-xs select-none">|</span>
-						<PlaceholderChips :tokens="stepTokens" @insert="insertAtCursor" />
-					</div>
-					<!-- Syntax hint -->
-					<div class="mb-2 flex items-start gap-2 rounded-md bg-surface-gray-2 px-3 py-2 text-xs text-ink-gray-6">
-						<Info class="size-3.5 shrink-0 mt-0.5 text-ink-gray-4" />
-						<span>
-							{{ __('Use') }}
-							<code class="bg-surface-base rounded px-1 font-mono text-ink-blue-6">+[label](value)</code>
-							{{ __('to embed a copyable chip.') }}
-						</span>
-					</div>
-					<textarea
-						ref="instructionsRef"
-						v-model="activeStep.instructions"
-						rows="12"
-						class="w-full rounded border border-outline-gray-2 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-outline-blue-3"
-						:placeholder="__('Describe what the student should do.\nUse +[Copy label](value) to add inline copyable values.')"
-						@input="isDirty = true"
-					/>
-				</div>
-
-				<div v-if="activeStep.item_type !== 'Text'" class="border-t pt-4">
-					<div class="text-sm font-medium text-ink-gray-7 mb-3">
-						{{ __('Navigation') }}
-						<span class="font-normal text-ink-gray-4 text-xs ml-1">{{ __('(optional — opens a pre-filled form in the lab system window)') }}</span>
-					</div>
-					<div class="space-y-3">
-						<div>
-							<label class="block text-sm font-medium text-ink-gray-7 mb-1">{{ __('Path') }}</label>
-							<input
-								v-model="activeStep.autocomplete_nav_path"
-								type="text"
-								class="w-full rounded border border-outline-gray-2 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-outline-blue-3"
-								placeholder="/app/sales-invoice/new-sales-invoice-1"
-								@input="isDirty = true"
-							/>
-						</div>
-						<div>
-							<label class="block text-sm font-medium text-ink-gray-7 mb-1">{{ __('Params (JSON)') }}</label>
-							<PlaceholderChips :tokens="navTokens" @insert="insertAtCursor" class="mb-2" />
-							<textarea
-								v-model="activeStep.autocomplete_nav_params"
-								rows="2"
-								class="w-full rounded border border-outline-gray-2 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-outline-blue-3"
-								:placeholder='`{\"company\": \"{company_name}\", \"customer\": \"ACME\"}`'
-								@input="isDirty = true"
-							/>
-						</div>
-					</div>
-				</div>
-			</div>
-		</template>
-	</Dialog>
-
-	<!-- Criterion Modal -->
-	<Dialog
-		v-model="showCriterionModal"
-		:options="{
-			title: isNewCriterion ? __('Add Criterion') : __('Edit Criterion'),
-			size: 'xl',
-			actions: [
-				{ label: __('Close'), variant: 'solid', onClick({ close }) { close() } },
-			],
-		}"
-	>
-		<template #body-content>
-			<div v-if="activeCriterion" class="space-y-4">
-				<FormControl
-					v-model="activeCriterion.criterion_name"
-					:label="__('Criterion Name')"
-					:required="true"
-					@input="isDirty = true"
-				/>
-				<div class="grid grid-cols-2 gap-3">
-					<FormControl
-						v-model="activeCriterion.doctype_to_check"
-						:label="__('DocType to Check')"
-						:description="__('e.g. Sales Invoice')"
-						:required="true"
-						@input="isDirty = true"
-					/>
-					<FormControl
-						v-model="activeCriterion.points"
-						:label="__('Points')"
-						type="number"
-						@input="isDirty = true"
-					/>
-					<FormControl
-						v-model="activeCriterion.comparison_operator"
-						:label="__('Comparison')"
-						type="select"
-						:options="['Exists', 'Equals', 'Contains', 'Greater Than', 'Less Than']"
-						@change="isDirty = true"
-					/>
-					<FormControl
-						v-model="activeCriterion.field_to_check"
-						:label="__('Field to Check')"
-						:description="__('Leave empty to check record existence only')"
-						@input="isDirty = true"
-					/>
-					<FormControl
-						v-model="activeCriterion.expected_value"
-						:label="__('Expected Value')"
-						:description="__('Required for Equals/Contains/Greater/Less comparisons')"
-						class="col-span-1"
-						@input="isDirty = true"
-					/>
-				</div>
-				<div>
-					<div class="flex items-center justify-between mb-1">
-						<label class="block text-sm font-medium text-ink-gray-7">
-							{{ __('Filters (JSON array)') }}
-						</label>
-					</div>
-					<!-- Placeholder chips for criterion -->
-					<PlaceholderChips :tokens="criterionTokens" @insert="insertAtCursor" class="mb-2" />
-					<textarea
-						v-model="activeCriterion.filters"
-						rows="3"
-						class="w-full rounded border border-outline-gray-2 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-outline-blue-3"
-						:placeholder='`[[\"company\", \"=\", \"{company_name}\"]]`'
-						@input="isDirty = true"
-					/>
-					<p class="text-xs text-ink-gray-5 mt-1">
-						{{ __('Standard Frappe filter format. Placeholders above are replaced at evaluation time.') }}
-					</p>
-				</div>
-				<FormControl
-					v-model="activeCriterion.description"
-					:label="__('Description')"
-					type="textarea"
-					:rows="3"
-					@input="isDirty = true"
-				/>
-			</div>
-		</template>
-	</Dialog>
 </template>
+
 <script setup>
 import {
-	Breadcrumbs,
 	Button,
 	Badge,
 	Combobox,
-	Dialog,
+	Dropdown,
 	FormControl,
 	createDocumentResource,
 	call,
 	toast,
 	usePageMeta,
 } from 'frappe-ui'
-import { computed, defineComponent, h, inject, onMounted, onBeforeUnmount, reactive, ref, nextTick, watch } from 'vue'
-import { Plus, X, Info, Check } from 'lucide-vue-next'
+import { computed, inject, onMounted, onBeforeUnmount, reactive, ref, nextTick, watch } from 'vue'
+import {
+	Plus, X, Check, Copy, GripVertical, ChevronDown, LayoutTemplate,
+} from 'lucide-vue-next'
+import Draggable from 'vuedraggable'
 import { useRouter } from 'vue-router'
-
-// ── Markdown renderer (shared with LabWindow) ──────────────────────────────
-function renderMarkdown(text) {
-	if (!text) return ''
-	const lines = text.split('\n')
-	const out = []
-	let inUl = false, inOl = false
-	function closeList() {
-		if (inUl) { out.push('</ul>'); inUl = false }
-		if (inOl) { out.push('</ol>'); inOl = false }
-	}
-	function inline(s) {
-		return s
-			.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
-			.replace(/\*([^*\n]+)\*/g, '<em>$1</em>')
-			.replace(/`([^`\n]+)`/g, '<code>$1</code>')
-			.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
-	}
-	for (const line of lines) {
-		const h1 = line.match(/^# (.+)$/), h2 = line.match(/^## (.+)$/), h3 = line.match(/^### (.+)$/)
-		const ul = line.match(/^[*-] (.+)$/), ol = line.match(/^\d+\. (.+)$/)
-		const hr = line.match(/^---+$/)
-		if (h1) { closeList(); out.push(`<h1>${inline(h1[1])}</h1>`) }
-		else if (h2) { closeList(); out.push(`<h2>${inline(h2[1])}</h2>`) }
-		else if (h3) { closeList(); out.push(`<h3>${inline(h3[1])}</h3>`) }
-		else if (hr) { closeList(); out.push('<hr>') }
-		else if (ul) {
-			if (inOl) { out.push('</ol>'); inOl = false }
-			if (!inUl) { out.push('<ul>'); inUl = true }
-			out.push(`<li>${inline(ul[1])}</li>`)
-		} else if (ol) {
-			if (inUl) { out.push('</ul>'); inUl = false }
-			if (!inOl) { out.push('<ol>'); inOl = true }
-			out.push(`<li>${inline(ol[1])}</li>`)
-		} else if (line.trim() === '') { closeList(); out.push('') }
-		else { closeList(); out.push(`<p>${inline(line)}</p>`) }
-	}
-	closeList()
-	return out.join('\n')
-}
-
-// ── Markdown toolbar for description ──────────────────────────────────────
-const descTextareaRef = ref(null)
-const descFmtButtons = [
-	{ cmd: 'bold',   label: 'B',      title: 'Bold (**text**)' },
-	{ cmd: 'italic', label: 'I',      title: 'Italic (*text*)' },
-	{ cmd: 'code',   label: '</>',    title: 'Inline code' },
-	{ cmd: 'h2',     label: 'H2',     title: 'Heading 2 (## text)' },
-	{ cmd: 'h3',     label: 'H3',     title: 'Heading 3 (### text)' },
-	{ cmd: 'ul',     label: '• List', title: 'Unordered list' },
-	{ cmd: 'ol',     label: '1. List', title: 'Ordered list' },
-]
-
-function applyDescFormat(cmd) {
-	const ta = descTextareaRef.value
-	if (!ta) return
-	const start = ta.selectionStart, end = ta.selectionEnd
-	const sel = descMarkdown.value.substring(start, end)
-	let insert = '', cursorOffset = 0
-	if (cmd === 'bold')   { insert = `**${sel || 'bold text'}**`; cursorOffset = sel ? insert.length : 2 }
-	else if (cmd === 'italic') { insert = `*${sel || 'italic text'}*`; cursorOffset = sel ? insert.length : 1 }
-	else if (cmd === 'code')   { insert = `\`${sel || 'code'}\``; cursorOffset = sel ? insert.length : 1 }
-	else if (cmd === 'h2') { insert = `## ${sel || 'Heading'}`; cursorOffset = insert.length }
-	else if (cmd === 'h3') { insert = `### ${sel || 'Heading'}`; cursorOffset = insert.length }
-	else if (cmd === 'ul') {
-		insert = (sel || 'item').split('\n').map(l => `- ${l}`).join('\n'); cursorOffset = insert.length
-	} else if (cmd === 'ol') {
-		insert = (sel || 'item').split('\n').map((l, i) => `${i + 1}. ${l}`).join('\n'); cursorOffset = insert.length
-	}
-	descMarkdown.value = descMarkdown.value.substring(0, start) + insert + descMarkdown.value.substring(end)
-	isDirty.value = true
-	nextTick(() => {
-		ta.focus()
-		ta.setSelectionRange(start + cursorOffset, start + cursorOffset)
-	})
-}
-
-// ── Markdown formatting buttons for step instructions ──────────────────────
-const mdFmtButtons = [
-	{ cmd: 'bold',    label: 'B',       title: 'Bold (**text**)' },
-	{ cmd: 'italic',  label: 'I',       title: 'Italic (*text*)' },
-	{ cmd: 'code',    label: '</>',     title: 'Inline code (`code`)' },
-	{ cmd: 'ul',      label: '• Lista', title: 'Unordered list (- item)' },
-	{ cmd: 'ol',      label: '1. Lista',title: 'Ordered list (1. item)' },
-	{ cmd: 'check',   label: '☐ Checkbox', title: 'Checkbox item (- [ ] item) — student can tick off' },
-]
-
-function applyMdFormat(cmd) {
-	const ta = instructionsRef.value
-	if (!ta) return
-	const start = ta.selectionStart
-	const end = ta.selectionEnd
-	const sel = ta.value.substring(start, end)
-	let before = ta.value.substring(0, start)
-	let after = ta.value.substring(end)
-	let insert = '', cursorOffset = 0
-
-	if (cmd === 'bold')   { insert = `**${sel || 'bold text'}**`; cursorOffset = sel ? insert.length : 2 }
-	else if (cmd === 'italic') { insert = `*${sel || 'italic text'}*`; cursorOffset = sel ? insert.length : 1 }
-	else if (cmd === 'code')   { insert = `\`${sel || 'code'}\``; cursorOffset = sel ? insert.length : 1 }
-	else if (cmd === 'ul') {
-		const lines = (sel || 'item').split('\n').map(l => `- ${l}`).join('\n')
-		insert = lines; cursorOffset = insert.length
-	} else if (cmd === 'ol') {
-		const lines = (sel || 'item').split('\n').map((l, i) => `${i + 1}. ${l}`).join('\n')
-		insert = lines; cursorOffset = insert.length
-	} else if (cmd === 'check') {
-		const lines = (sel || 'krok do wykonania').split('\n').map(l => `- [ ] ${l}`).join('\n')
-		insert = lines; cursorOffset = insert.length
-	}
-
-	ta.value = before + insert + after
-	ta.dispatchEvent(new Event('input', { bubbles: true }))
-	nextTick(() => {
-		const pos = start + cursorOffset
-		ta.setSelectionRange(pos, pos)
-		ta.focus()
-	})
-}
 import { sessionStore } from '@/stores/session'
 import Link from '@/components/Controls/Link.vue'
-
-// Inline PlaceholderChips component
-const PlaceholderChips = defineComponent({
-	props: {
-		tokens: { type: Array, required: true },
-	},
-	emits: ['insert'],
-	setup(props, { emit }) {
-		return () =>
-			h('div', { class: 'flex flex-wrap gap-1.5 items-center' }, [
-				h('span', { class: 'text-xs text-ink-gray-4' }, __('Variables:')),
-				...props.tokens.map((t) =>
-					h(
-						'button',
-						{
-							type: 'button',
-							title: t.description,
-							class:
-								'inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-mono bg-surface-gray-2 hover:bg-surface-blue-2 text-ink-gray-7 hover:text-ink-blue-6 border border-outline-gray-2 hover:border-outline-blue-2 transition-colors cursor-pointer',
-							onClick: () => emit('insert', t.value),
-						},
-						[
-							h('span', {}, t.value),
-						]
-					)
-				),
-			])
-	},
-})
+import PageHeader from '@/components/Layouts/PageHeader.vue'
+import HeaderButton from '@/components/HeaderButton.vue'
+import LabStepEditor from '@/components/Lab/LabStepEditor.vue'
+import LabCriterionEditor from '@/components/Lab/LabCriterionEditor.vue'
+import LabPreviewPanel from '@/components/Lab/LabPreviewPanel.vue'
+import LabValidationChecklist from '@/components/Lab/LabValidationChecklist.vue'
+import { getLmsRoute } from '@/utils/basePath'
+import { DESC_FMT_BUTTONS, renderLabDescriptionMarkdown } from '@/utils/labMarkdown'
+import { LAB_TEMPLATES, applyLabTemplate } from '@/utils/labTemplates'
 
 const { brand } = sessionStore()
 const user = inject('$user')
 const router = useRouter()
 const isDirty = ref(false)
 const saving = ref(false)
-const showStepModal = ref(false)
-const showCriterionModal = ref(false)
-const editingStepIdx = ref(null)
-const editingCriterionIdx = ref(null)
-const instructionsRef = ref(null)
+const activeTab = ref('basics')
+const expandedStepIdx = ref(null)
+const expandedCriterionIdx = ref(null)
+const descTextareaRef = ref(null)
+const connectionStatus = ref(null)
+const loadingPreview = ref(false)
+const previewData = ref(null)
+const externalDoctypes = ref([])
+const loadingExternalDoctypes = ref(false)
 
 const props = defineProps({
 	labID: { type: String, required: true },
 })
 
-// Available placeholder tokens per context
-// Session-level (always available)
-const SESSION_TOKENS = [
-	{ value: '{username}',    description: __("Student's login on the external system") },
-	{ value: '{password}',    description: __("Student's password on the external system") },
-	{ value: '{company_name}',description: __('Generated company name for this student') },
-	{ value: '{url}',         description: __('Base URL of the external system') },
-]
-// Randomized business data (generated per lab session by _generate_session_data)
-const SESSION_DATA_TOKENS = [
-	{ value: '{customer_name}',  description: __('Random Polish company name (customer)') },
-	{ value: '{customer_type}',  description: __('Customer type: Company or Individual') },
-	{ value: '{customer_group}', description: __('Customer group, e.g. Commercial') },
-	{ value: '{territory}',      description: __('Sales territory, e.g. Poland') },
-	{ value: '{tax_id}',         description: __('NIP / VAT number') },
-	{ value: '{contact_first}',  description: __('Contact person — first name') },
-	{ value: '{contact_last}',   description: __('Contact person — last name') },
-	{ value: '{contact_full}',   description: __('Contact person — full name') },
-	{ value: '{contact_email}',  description: __('Contact person — e-mail') },
-	{ value: '{contact_phone}',  description: __('Contact person — phone') },
-	{ value: '{addr_street}',    description: __('Address — street line') },
-	{ value: '{addr_city}',      description: __('Address — city') },
-	{ value: '{addr_pincode}',   description: __('Address — postal code') },
-	{ value: '{item_name}',      description: __('Random product name') },
-	{ value: '{item_code}',      description: __('Product code (item_name + token)') },
-	{ value: '{item_group}',     description: __('Product group, e.g. Products') },
-	{ value: '{item_uom}',       description: __('Unit of measure, e.g. Nos') },
-	{ value: '{item_price}',     description: __('Selling price (PLN)') },
-	{ value: '{order_qty}',      description: __('Order quantity') },
-	{ value: '{discount_pct}',   description: __('Discount percentage') },
-]
+const tabs = computed(() => [
+	{ id: 'basics', label: __('Basics') },
+	{ id: 'steps', label: __('Steps'), count: lab.value?.steps?.length || 0 },
+	{ id: 'evaluation', label: __('Evaluation'), count: lab.value?.evaluation_criteria?.length || 0 },
+	{ id: 'preview', label: __('Preview') },
+])
 
-const stepTokens = [
-	...SESSION_TOKENS,
-	...SESSION_DATA_TOKENS,
-]
+const templateOptions = computed(() =>
+	LAB_TEMPLATES.map((tpl) => ({
+		label: tpl.label,
+		onClick: () => applyTemplate(tpl.id),
+	}))
+)
 
-const navTokens = [
-	{ value: '{company_name}', description: __('Generated company name') },
-	{ value: '{username}',     description: __("Student's login") },
-	...SESSION_DATA_TOKENS,
-]
-
-const criterionTokens = [
-	{ value: '{company_name}', description: __('Generated company name for this student') },
-	{ value: '{username}',     description: __("Student's login on the external system") },
-	...SESSION_DATA_TOKENS,
-]
-
-// Insert token at cursor in active input/textarea inside the dialog
-function insertAtCursor(token) {
-	const el = document.activeElement
-	const inDialog = el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') && el.closest('[role="dialog"]')
-	if (inDialog) {
-		const start = el.selectionStart ?? el.value.length
-		const end = el.selectionEnd ?? el.value.length
-		el.value = el.value.substring(0, start) + token + el.value.substring(end)
-		el.dispatchEvent(new Event('input', { bubbles: true }))
-		nextTick(() => {
-			el.setSelectionRange(start + token.length, start + token.length)
-			el.focus()
-		})
-	} else {
-		// Fallback: focus the instructions textarea and append
-		const ta = instructionsRef.value
-		if (ta) {
-			ta.focus()
-			const pos = ta.selectionStart ?? ta.value.length
-			const v = ta.value
-			ta.value = v.substring(0, pos) + token + v.substring(pos)
-			ta.dispatchEvent(new Event('input', { bubbles: true }))
-			nextTick(() => ta.setSelectionRange(pos + token.length, pos + token.length))
-		} else {
-			navigator.clipboard.writeText(token).then(() => {
-				toast({ title: __('Copied {0} — paste into the field', [token]), icon: 'check' })
-			})
+const labDoc = createDocumentResource({
+	doctype: 'LMS Lab',
+	name: props.labID,
+	auto: false,
+	onError(err) {
+		const msg = err?.messages?.[0] || ''
+		if (msg.includes('DoesNotExist') || msg.includes('not found') || err?.exc_type === 'DoesNotExistError') {
+			toast.error(__('Lab not found — it may have been deleted.'))
+			router.push({ name: 'Labs' })
 		}
+	},
+})
+
+const lab = computed(() => labDoc.doc)
+
+const descMarkdown = ref('')
+const renderedDesc = computed(() => renderLabDescriptionMarkdown(descMarkdown.value))
+
+watch(lab, (val) => {
+	if (val && descMarkdown.value === '') {
+		descMarkdown.value = val.description || ''
 	}
-}
+}, { immediate: true })
+
+watch(descMarkdown, (val) => {
+	if (lab.value) lab.value.description = val
+})
+
+watch(activeTab, (tab) => {
+	if (tab === 'preview' && !previewData.value) loadPreviewData()
+})
 
 onMounted(() => {
 	if (!user.data?.is_moderator && !user.data?.is_instructor) {
@@ -699,37 +475,6 @@ const keyboardShortcut = (e) => {
 		e.preventDefault()
 	}
 }
-
-const labDoc = createDocumentResource({
-	doctype: 'LMS Lab',
-	name: props.labID,
-	auto: false,
-	onError(err) {
-		const msg = err?.messages?.[0] || ''
-		if (msg.includes('DoesNotExist') || msg.includes('not found') || err?.exc_type === 'DoesNotExistError') {
-			toast.error(__('Lab not found — it may have been deleted.'))
-			router.push({ name: 'Labs' })
-		}
-	},
-})
-
-const lab = computed(() => labDoc.doc)
-
-// Description markdown state — synced from/to lab.description
-const descMarkdown = ref('')
-const renderedDesc = computed(() => renderMarkdown(descMarkdown.value))
-
-// Load description into textarea once lab doc arrives
-watch(lab, (val) => {
-	if (val && descMarkdown.value === '') {
-		descMarkdown.value = val.description || ''
-	}
-}, { immediate: true })
-
-// Keep lab.description in sync as user types
-watch(descMarkdown, (val) => {
-	if (lab.value) lab.value.description = val
-})
 
 const save = () => {
 	if (!lab.value?.title) {
@@ -753,101 +498,125 @@ const save = () => {
 	)
 }
 
-// Step helpers — edits write straight into lab.value.steps, no in-modal Save needed.
-// The top-level "Save" button still submits the whole lab doc, unchanged.
-const isNewStep = ref(false)
-
-const activeStep = computed(() => {
-	const idx = editingStepIdx.value
-	return idx !== null ? lab.value?.steps?.[idx] : null
-})
-
-const openStepModal = (idx = null) => {
-	if (idx === null) {
-		if (!lab.value.steps) lab.value.steps = []
-		lab.value.steps.push({
-			doctype: 'LMS Lab Step',
-			item_type: 'Step',
-			title: '',
-			instructions: '',
-			autocomplete_nav_path: '',
-			autocomplete_nav_params: '',
-		})
-		idx = lab.value.steps.length - 1
-		isNewStep.value = true
-	} else {
-		isNewStep.value = false
+function applyTemplate(templateId) {
+	if (!confirm(__('Apply this template? Existing steps and criteria will be replaced.'))) return
+	if (applyLabTemplate(lab.value, templateId)) {
+		isDirty.value = true
+		activeTab.value = 'steps'
+		toast.success(__('Template applied'))
 	}
-	editingStepIdx.value = idx
-	showStepModal.value = true
 }
 
-// Discard an empty row left behind by opening "Add Step" and closing without typing a title.
-watch(showStepModal, (val, wasOpen) => {
-	if (wasOpen && !val) {
-		const idx = editingStepIdx.value
-		const row = idx !== null ? lab.value?.steps?.[idx] : null
-		if (isNewStep.value && row && !row.title?.trim()) {
-			lab.value.steps.splice(idx, 1)
-		}
-		editingStepIdx.value = null
-		isNewStep.value = false
+function applyDescFormat(cmd) {
+	const ta = descTextareaRef.value
+	if (!ta) return
+	const start = ta.selectionStart
+	const end = ta.selectionEnd
+	const sel = descMarkdown.value.substring(start, end)
+	let insert = ''
+	let cursorOffset = 0
+	if (cmd === 'bold') { insert = `**${sel || 'bold text'}**`; cursorOffset = sel ? insert.length : 2 }
+	else if (cmd === 'italic') { insert = `*${sel || 'italic text'}*`; cursorOffset = sel ? insert.length : 1 }
+	else if (cmd === 'code') { insert = `\`${sel || 'code'}\``; cursorOffset = sel ? insert.length : 1 }
+	else if (cmd === 'h2') { insert = `## ${sel || 'Heading'}`; cursorOffset = insert.length }
+	else if (cmd === 'h3') { insert = `### ${sel || 'Heading'}`; cursorOffset = insert.length }
+	else if (cmd === 'ul') {
+		insert = (sel || 'item').split('\n').map((l) => `- ${l}`).join('\n')
+		cursorOffset = insert.length
+	} else if (cmd === 'ol') {
+		insert = (sel || 'item').split('\n').map((l, i) => `${i + 1}. ${l}`).join('\n')
+		cursorOffset = insert.length
 	}
-})
+	descMarkdown.value = descMarkdown.value.substring(0, start) + insert + descMarkdown.value.substring(end)
+	isDirty.value = true
+	nextTick(() => {
+		ta.focus()
+		ta.setSelectionRange(start + cursorOffset, start + cursorOffset)
+	})
+}
 
-const removeStep = (idx) => {
-	lab.value.steps.splice(idx, 1)
+function stripInstructions(text) {
+	return text.replace(/\+\[[^\]]+\]\([^)]+\)/g, '[chip]').replace(/<[^>]+>/g, '').substring(0, 80)
+}
+
+function stepNumber(idx) {
+	let n = 0
+	for (let i = 0; i <= idx; i++) {
+		if ((lab.value?.steps?.[i]?.item_type || 'Step') === 'Step') n++
+	}
+	return n
+}
+
+// Steps
+function addStep() {
+	if (!lab.value.steps) lab.value.steps = []
+	lab.value.steps.push({
+		doctype: 'LMS Lab Step',
+		item_type: 'Step',
+		title: '',
+		instructions: '',
+		autocomplete_nav_path: '',
+		autocomplete_nav_params: '',
+	})
+	expandedStepIdx.value = lab.value.steps.length - 1
 	isDirty.value = true
 }
 
-const expandedSteps = reactive({})
-
-// Criterion helpers — edits write straight into lab.value.evaluation_criteria, no in-modal Save needed.
-const isNewCriterion = ref(false)
-
-const activeCriterion = computed(() => {
-	const idx = editingCriterionIdx.value
-	return idx !== null ? lab.value?.evaluation_criteria?.[idx] : null
-})
-
-const openCriterionModal = (idx = null) => {
-	if (idx === null) {
-		if (!lab.value.evaluation_criteria) lab.value.evaluation_criteria = []
-		lab.value.evaluation_criteria.push({
-			doctype: 'LMS Lab Evaluation Criterion',
-			criterion_name: '',
-			doctype_to_check: '',
-			filters: '',
-			field_to_check: '',
-			expected_value: '',
-			comparison_operator: 'Exists',
-			points: 10,
-			description: '',
-		})
-		idx = lab.value.evaluation_criteria.length - 1
-		isNewCriterion.value = true
-	} else {
-		isNewCriterion.value = false
-	}
-	editingCriterionIdx.value = idx
-	showCriterionModal.value = true
+function toggleExpandedStep(idx) {
+	expandedStepIdx.value = expandedStepIdx.value === idx ? null : idx
 }
 
-// Discard an empty row left behind by opening "Add Criterion" and closing without filling it in.
-watch(showCriterionModal, (val, wasOpen) => {
-	if (wasOpen && !val) {
-		const idx = editingCriterionIdx.value
-		const row = idx !== null ? lab.value?.evaluation_criteria?.[idx] : null
-		if (isNewCriterion.value && row && !row.criterion_name?.trim() && !row.doctype_to_check?.trim()) {
-			lab.value.evaluation_criteria.splice(idx, 1)
-		}
-		editingCriterionIdx.value = null
-		isNewCriterion.value = false
-	}
-})
+function removeStep(idx) {
+	lab.value.steps.splice(idx, 1)
+	if (expandedStepIdx.value === idx) expandedStepIdx.value = null
+	isDirty.value = true
+}
 
-const removeCriterion = (idx) => {
+function duplicateStep(idx) {
+	const src = lab.value.steps[idx]
+	const copy = { ...src, name: undefined, doctype: 'LMS Lab Step' }
+	lab.value.steps.splice(idx + 1, 0, copy)
+	expandedStepIdx.value = idx + 1
+	isDirty.value = true
+}
+
+function onStepsReordered() {
+	isDirty.value = true
+}
+
+// Criteria
+function addCriterion() {
+	if (!lab.value.evaluation_criteria) lab.value.evaluation_criteria = []
+	lab.value.evaluation_criteria.push({
+		doctype: 'LMS Lab Evaluation Criterion',
+		criterion_name: '',
+		doctype_to_check: '',
+		filters: '',
+		field_to_check: '',
+		expected_value: '',
+		comparison_operator: 'Exists',
+		points: 10,
+		description: '',
+	})
+	expandedCriterionIdx.value = lab.value.evaluation_criteria.length - 1
+	isDirty.value = true
+}
+
+function toggleExpandedCriterion(idx) {
+	expandedCriterionIdx.value = expandedCriterionIdx.value === idx ? null : idx
+}
+
+function removeCriterion(idx) {
 	lab.value.evaluation_criteria.splice(idx, 1)
+	if (expandedCriterionIdx.value === idx) expandedCriterionIdx.value = null
+	isDirty.value = true
+}
+
+function duplicateCriterion(idx) {
+	const src = lab.value.evaluation_criteria[idx]
+	const copy = { ...src, name: undefined, doctype: 'LMS Lab Evaluation Criterion' }
+	lab.value.evaluation_criteria.splice(idx + 1, 0, copy)
+	expandedCriterionIdx.value = idx + 1
 	isDirty.value = true
 }
 
@@ -855,9 +624,47 @@ const totalCriteriaPoints = computed(() =>
 	(lab.value?.evaluation_criteria || []).reduce((sum, c) => sum + (Number(c.points) || 0), 0)
 )
 
-// Role helpers — verify role names against the external system
-const externalRoles = ref(null) // null = not loaded/unavailable, Array = role names on the external system
+// Connection & external data
+async function testConnection(connection) {
+	if (!connection) {
+		connectionStatus.value = null
+		return
+	}
+	connectionStatus.value = null
+	try {
+		const result = await call('lms.lms.api.test_lab_connection', { lab_connection: connection })
+		connectionStatus.value = !!result?.ok
+	} catch {
+		connectionStatus.value = false
+	}
+}
+
+async function loadExternalDoctypes(connection) {
+	if (!connection) {
+		externalDoctypes.value = []
+		return
+	}
+	loadingExternalDoctypes.value = true
+	try {
+		externalDoctypes.value = await call('lms.lms.api.get_external_doctypes', { lab_connection: connection })
+	} catch {
+		externalDoctypes.value = []
+	} finally {
+		loadingExternalDoctypes.value = false
+	}
+}
+
+function onConnectionChange() {
+	isDirty.value = true
+	loadExternalRoles()
+	testConnection(lab.value?.lab_connection)
+	loadExternalDoctypes(lab.value?.lab_connection)
+}
+
+// Roles
+const externalRoles = ref(null)
 const loadingExternalRoles = ref(false)
+const roleQueries = reactive({})
 
 const loadExternalRoles = async () => {
 	const connection = lab.value?.lab_connection
@@ -868,7 +675,7 @@ const loadExternalRoles = async () => {
 	loadingExternalRoles.value = true
 	try {
 		externalRoles.value = await call('lms.lms.api.get_external_roles', { lab_connection: connection })
-	} catch (err) {
+	} catch {
 		externalRoles.value = null
 	} finally {
 		loadingExternalRoles.value = false
@@ -878,8 +685,15 @@ const loadExternalRoles = async () => {
 watch(
 	() => lab.value?.lab_connection,
 	(val, oldVal) => {
-		if (val && val !== oldVal) loadExternalRoles()
-		else if (!val) externalRoles.value = null
+		if (val && val !== oldVal) {
+			loadExternalRoles()
+			testConnection(val)
+			loadExternalDoctypes(val)
+		} else if (!val) {
+			externalRoles.value = null
+			connectionStatus.value = null
+			externalDoctypes.value = []
+		}
 	}
 )
 
@@ -903,21 +717,10 @@ const isUnknownRole = (idx) => {
 	return !externalRoles.value.includes(v)
 }
 
-// What's currently typed in each row's Autocomplete search box, keyed by row index.
-// Used to offer a "Use '<text>'" option so a role not (yet) on the external system can
-// still be entered — the field underneath is plain free text, the list is just a helper.
-const roleQueries = reactive({})
-
 const roleOptionsFor = (idx) => {
 	const options = (externalRoles.value || []).map((name) => ({ label: name, value: name }))
 	const query = (roleQueries[idx] || '').trim()
 	const current = (lab.value.roles[idx]?.role || '').trim()
-	// Combobox resyncs its internal `query` to the committed value's label on
-	// every mount/close (see displayValue watcher in frappe-ui's Combobox.vue),
-	// which flows back here via @update:query. Without this guard, that resync
-	// would synthesize a "Use '<value>'" option whose `value` matches the
-	// already-selected role but whose `label` doesn't — flipping displayValue
-	// between the two forever (infinite reactive update loop).
 	if (
 		query &&
 		query.toLowerCase() !== current.toLowerCase() &&
@@ -947,12 +750,38 @@ const removeRole = (idx) => {
 	const updated = [...(lab.value.roles || [])]
 	updated.splice(idx, 1)
 	lab.value.roles = updated
-	// Shift typed search-query state down so it stays aligned with the rows that moved up.
 	for (let i = idx; i < updated.length; i++) {
 		roleQueries[i] = roleQueries[i + 1] || ''
 	}
 	delete roleQueries[updated.length]
 	isDirty.value = true
+}
+
+// Preview & test
+async function loadPreviewData() {
+	loadingPreview.value = true
+	try {
+		previewData.value = await call('lms.lms.api.get_lab_preview', { lab: props.labID })
+	} catch (err) {
+		toast.error(err?.messages?.[0] || __('Could not load preview'))
+	} finally {
+		loadingPreview.value = false
+	}
+}
+
+function openTestLab() {
+	const labPath = encodeURIComponent(props.labID)
+	const url = getLmsRoute(`/labs/${labPath}/_preview?preview=1`)
+	const panelW = 420
+	const screenH = window.screen.availHeight
+	const previewWin = window.open(
+		url,
+		'lms_lab_preview',
+		`width=${panelW},height=${screenH},resizable=yes,scrollbars=yes`
+	)
+	if (!previewWin) {
+		window.location.href = url
+	}
 }
 
 const breadcrumbs = computed(() => [
@@ -962,22 +791,3 @@ const breadcrumbs = computed(() => [
 
 usePageMeta(() => ({ title: lab.value?.title || __('Lab'), icon: brand.favicon }))
 </script>
-
-<style>
-.lab-desc-preview h1 { font-size: 1.25rem; font-weight: 700; color: #111827; margin: 0.75rem 0 0.4rem; }
-.lab-desc-preview h2 { font-size: 1.05rem; font-weight: 600; color: #1f2937; margin: 0.6rem 0 0.3rem; }
-.lab-desc-preview h3 { font-size: 0.9rem;  font-weight: 600; color: #374151; margin: 0.5rem 0 0.2rem; }
-.lab-desc-preview p  { margin: 0 0 0.4rem; line-height: 1.6; }
-.lab-desc-preview ul { list-style-type: disc;    padding-left: 1.25rem; margin: 0.25rem 0; }
-.lab-desc-preview ol { list-style-type: decimal; padding-left: 1.25rem; margin: 0.25rem 0; }
-.lab-desc-preview li { margin: 0.1rem 0; line-height: 1.5; }
-.lab-desc-preview hr { border: none; border-top: 1px solid #e5e7eb; margin: 0.75rem 0; }
-.lab-desc-preview code {
-	background: #f3f4f6; border: 1px solid #e5e7eb;
-	border-radius: 3px; padding: 0.1rem 0.3rem;
-	font-size: 0.82em; font-family: ui-monospace, monospace; color: #dc2626;
-}
-.lab-desc-preview a { color: #2563eb; text-decoration: underline; }
-.lab-desc-preview strong { font-weight: 600; }
-.lab-desc-preview em { font-style: italic; }
-</style>

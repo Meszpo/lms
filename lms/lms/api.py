@@ -3172,6 +3172,30 @@ def get_external_roles(lab_connection: str):
 
 
 @frappe.whitelist()
+def get_external_doctypes(lab_connection: str):
+	from lms.lms.lab import get_external_doctypes as _doctypes
+	return _doctypes(lab_connection=lab_connection)
+
+
+@frappe.whitelist()
+def get_doctype_fields(lab_connection: str, doctype: str):
+	from lms.lms.lab import get_doctype_fields as _fields
+	return _fields(lab_connection=lab_connection, doctype=doctype)
+
+
+@frappe.whitelist()
+def test_lab_connection(lab_connection: str):
+	from lms.lms.lab import test_lab_connection as _test
+	return _test(lab_connection=lab_connection)
+
+
+@frappe.whitelist()
+def get_lab_preview(lab: str):
+	from lms.lms.lab import get_lab_preview as _preview
+	return _preview(lab=lab)
+
+
+@frappe.whitelist()
 def get_course_lab_submissions(course: str) -> dict:
 	"""Returns the best (highest percentage) submission per lab for the current user."""
 	member = frappe.session.user

@@ -34,6 +34,7 @@ SESSION_DOCTYPES = [
 	"Customer",
 	"Supplier",
 	"Item",
+	"BOM",
 ]
 
 # Roles deliberately excluded from automatic owner-isolation: these are reserved for
@@ -159,6 +160,137 @@ def get_external_roles(lab_connection: str) -> list:
 
 	return sorted(row["name"] for row in resp.json().get("data", []))
 
+
+_SKIP_FIELD_TYPES = {
+	"Section Break",
+	"Column Break",
+	"Tab Break",
+	"HTML",
+	"Table",
+	"Table MultiSelect",
+	"Fold",
+	"Heading",
+	"Button",
+}
+
+
+@frappe.whitelist()
+def get_external_doctypes(lab_connection: str) -> list:
+	"""DocTypes commonly used in lab sessions — verified against the external system when possible."""
+	if not frappe.has_permission("LMS Lab", "write"):
+		frappe.throw(_("Not permitted."), frappe.PermissionError)
+
+	base_url, admin_key, admin_secret = _load_connection(lab_connection)
+	found = []
+	for doctype in SESSION_DOCTYPES:
+		resp = _raw_external_request(
+			"GET",
+			f"{base_url}/api/resource/DocType/{doctype}",
+			admin_key,
+			admin_secret,
+			timeout=10,
+		)
+		if resp.status_code == 200:
+			found.append(doctype)
+	return found or list(SESSION_DOCTYPES)
+
+
+@frappe.whitelist()
+def get_doctype_fields(lab_connection: str, doctype: str) -> list:
+	"""Returns field metadata for a DocType on the external lab system."""
+	if not frappe.has_permission("LMS Lab", "write"):
+		frappe.throw(_("Not permitted."), frappe.PermissionError)
+
+	doctype = (doctype or "").strip()
+	if not doctype:
+		frappe.throw(_("DocType is required."))
+
+	base_url, admin_key, admin_secret = _load_connection(lab_connection)
+	resp = _raw_external_request(
+		"GET",
+		f"{base_url}/api/resource/DocType/{doctype}",
+		admin_key,
+		admin_secret,
+		timeout=15,
+	)
+	if resp.status_code != 200:
+		frappe.throw(_("Could not fetch fields for DocType '{0}'.").format(doctype))
+
+	fields = (resp.json().get("data") or {}).get("fields") or []
+	return [
+		{
+			"fieldname": f.get("fieldname"),
+			"label": f.get("label") or f.get("fieldname"),
+			"fieldtype": f.get("fieldtype"),
+		}
+		for f in fields
+		if f.get("fieldname") and f.get("fieldtype") not in _SKIP_FIELD_TYPES
+	]
+
+
+@frappe.whitelist()
+def test_lab_connection(lab_connection: str) -> dict:
+	"""Ping the external system to verify credentials and reachability."""
+	if not frappe.has_permission("LMS Lab Connection", "read"):
+		frappe.throw(_("Not permitted."), frappe.PermissionError)
+
+	try:
+		base_url, admin_key, admin_secret = _load_connection(lab_connection)
+		resp = _raw_external_request(
+			"GET",
+			f"{base_url}/api/resource/User",
+			admin_key,
+			admin_secret,
+			params={"fields": json.dumps(["name"]), "limit_page_length": 1},
+			timeout=10,
+		)
+		if resp.status_code == 200:
+			return {"ok": True}
+		return {"ok": False, "message": _("External system returned status {0}.").format(resp.status_code)}
+	except Exception as exc:
+		return {"ok": False, "message": str(exc)}
+
+
+@frappe.whitelist()
+def get_lab_preview(lab: str) -> dict:
+	"""Sample lab session payload for instructor preview — no provisioning."""
+	if not frappe.has_permission("LMS Lab", "write"):
+		frappe.throw(_("Not permitted."), frappe.PermissionError)
+
+	doc = frappe.get_doc("LMS Lab", lab)
+	conn_url = ""
+	if doc.lab_connection:
+		conn_url = frappe.db.get_value("LMS Lab Connection", doc.lab_connection, "url") or ""
+
+	session_data = _generate_session_data("preview")
+	prefix = (doc.company_prefix or "Lab").strip() or "Lab"
+	steps = []
+	for idx, step in enumerate(doc.steps or [], start=1):
+		row = step.as_dict()
+		row["idx"] = idx
+		steps.append(row)
+
+	return {
+		"preview": True,
+		"lab_title": doc.title,
+		"url": conn_url.rstrip("/"),
+		"company_name": f"{prefix}_preview_user",
+		"external_username": "preview.user",
+		"external_password": "preview123",
+		"expires_at": add_to_date(now_datetime(), minutes=doc.max_session_minutes or 60),
+		"session_data": session_data,
+		"steps": steps,
+		"passing_percentage": doc.passing_percentage,
+		"evaluation_criteria": [
+			{
+				"criterion_name": c.criterion_name,
+				"points": c.points,
+				"doctype_to_check": c.doctype_to_check,
+				"comparison_operator": c.comparison_operator,
+			}
+			for c in (doc.evaluation_criteria or [])
+		],
+	}
 
 
 def _ensure_owner_restricted(base_url, admin_key, admin_secret, role: str, doctype: str) -> bool:

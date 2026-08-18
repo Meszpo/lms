@@ -1170,3 +1170,180 @@ Zoom Account created successfully,Konto Zoom utworzone pomyślnie,
 Zoom account deleted successfully,Konto Zoom usunięte pomyślnie,
 Zoom Account updated successfully,Konto Zoom zaktualizowane pomyślnie,
 Lab,Laboratorium,
+"# Heading
+
+Write lab description in **Markdown**…","# Nagłówek
+
+Opis laboratorium w **Markdown**…",
+1. List,1. Lista,
+Add company filter ({company_name}),Dodaj filtr firmy ({company_name}),
+Add filter,Dodaj filtr,
+Add item_code filter ({company_name}-SUFFIX),Dodaj filtr item_code ({company_name}-SUFFIX),
+Add param,Dodaj parametr,
+Address — city,Adres — miasto,
+Address — postal code,Adres — kod pocztowy,
+Address — street line,Adres — ulica,
+Advanced settings,Ustawienia zaawansowane,
+Advanced: edit JSON,Zaawansowane: edytuj JSON,
+Apply template,Zastosuj szablon,
+Apply this template? Existing steps and criteria will be replaced.,Zastosować ten szablon? Istniejące kroki i kryteria zostaną zastąpione.,
+Basics,Podstawy,
+Bold (**text**),Pogrubienie (**tekst**),
+Checkbox item (- [ ] item),Pozycja z polem wyboru (- [ ] pozycja),
+Checking…,Sprawdzanie…,
+Checklist,Lista kontrolna,
+Connection OK,Połączenie OK,
+Contact,Kontakt,
+Contact person — e-mail,Osoba kontaktowa — e-mail,
+Contact person — first name,Osoba kontaktowa — imię,
+Contact person — full name,Osoba kontaktowa — imię i nazwisko,
+Contact person — last name,Osoba kontaktowa — nazwisko,
+Contact person — phone,Osoba kontaktowa — telefon,
+Copied,Skopiowano,
+Copy password,Kopiuj hasło,
+Copy username,Kopiuj login,
+Could not load preview,Nie udało się załadować podglądu,
+Could not verify roles against the external system — check the names manually.,Nie udało się zweryfikować ról w systemie zewnętrznym — sprawdź nazwy ręcznie.,
+Course page description,Opis na stronie kursu,
+Create Customer,Utwórz klienta,
+Create Item,Utwórz produkt,
+Create Sales Invoice,Utwórz fakturę sprzedaży,
+Create Sales Order,Utwórz zlecenie sprzedaży,
+"Create a Sales Invoice for customer **{customer_name}** with item **{item_name}**, quantity **{order_qty}**.","Utwórz fakturę sprzedaży dla klienta **{customer_name}** z produktem **{item_name}**, ilość **{order_qty}**.",
+"Create a Sales Order for **{customer_name}** with item **{item_name}**, qty **{order_qty}**, discount **{discount_pct}%**.","Utwórz zlecenie sprzedaży dla **{customer_name}** z produktem **{item_name}**, ilość **{order_qty}**, rabat **{discount_pct}%**.",
+Create a customer and issue a sales invoice,Klient + faktura sprzedaży,
+Create a customer and sales order,Utwórz klienta i zlecenie sprzedaży,
+Create a finished product with a code unique per student session,Utwórz produkt gotowy z kodem unikalnym dla sesji studenta,
+"Create a new customer with name **{customer_name}**.
+
+Use the copy chip: +[Customer name]({customer_name})","Utwórz nowego klienta o nazwie **{customer_name}**.
+
+Użyj chipa do kopiowania: +[Nazwa klienta]({customer_name})",
+"Create a new item:
+- Name: +[Item]({item_name})
+- Code: +[Code]({item_code})
+- Price: {item_price} PLN","Utwórz nowy produkt:
+- Nazwa: +[Produkt]({item_name})
+- Kod: +[Kod]({item_code})
+- Cena: {item_price} PLN",
+Create a product and record stock,Utwórz produkt i zaksięguj stan magazynowy,
+Create customer **{customer_name}** with NIP **{tax_id}**.,Utwórz klienta **{customer_name}** z NIP **{tax_id}**.,
+Create finished product,Utwórz produkt gotowy,
+Customer,Klient,
+Customer + Sales Invoice,Klient + faktura sprzedaży,
+Customer exists,Klient istnieje,
+"Customer group, e.g. Commercial","Grupa klientów, np. Commercial",
+Customer type: Company or Individual,Typ klienta: firma lub osoba fizyczna,
+"Describe what the student should do.
+Use +[Copy label](value) to add inline copyable values.","Opisz co student powinien zrobić.
+Użyj +[Etykieta](wartość) aby dodać kopiowalne wartości.",
+Discount percentage,Procent rabatu,
+DocType,DocType,
+Duplicate,Powiel,
+Each student gets a unique item code based on their session company. Use the copy chips below.,Każdy student otrzymuje unikalny kod produktu na podstawie firmy sesji. Użyj chipów do kopiowania poniżej.,
+Evaluation criteria,Kryteria oceny,
+Example: {0},Przykład: {0},
+Field,Pole,
+Filters,Filtry,
+Finished product created,Produkt gotowy utworzony,
+Fixed code suffix after {company_name}- (e.g. KOSZULKA-LOGO-M-001):,Stały sufiks kodu po {company_name}- (np. KOSZULKA-LOGO-M-001):,
+"For shared instructions with many concurrent students, use {company_name}-SUFFIX in chips and criteria — each student gets a unique code.",Przy wspólnych instrukcjach dla wielu studentów jednocześnie użyj {company_name}-SUFFIX w chipach i kryteriach — każdy student dostaje unikalny kod.,
+Generated company name for this student (unique per session),Wygenerowana nazwa firmy dla tego studenta (unikalna per sesja),
+"Go to: **Stock → Item → New**
+
+Fill in:
+- [ ] Item code: +[Item code]({company_name}-KOSZULKA-LOGO-M-001)
+- [ ] Item name: +[Company T-shirt with print – M](Company T-shirt with print – M)
+- [ ] Item group: +[Products](Products)
+- [ ] Default unit of measure: +[Nos](Nos)
+- [ ] Maintain stock: checked
+- [ ] Allow sales: checked
+- [ ] Allow purchase: unchecked
+
+Save the product.","Przejdź do: **Magazyn → Produkt → Utwórz**
+
+Uzupełnij pola:
+- [ ] Kod pozycji: +[Kod pozycji]({company_name}-KOSZULKA-LOGO-M-001)
+- [ ] Nazwa pozycji: +[Koszulka firmowa z nadrukiem – M](Koszulka firmowa z nadrukiem – M)
+- [ ] Grupa pozycji: +[Produkty](Produkty)
+- [ ] Domyślna jednostka miary: +[Szt.](Szt.)
+- [ ] Prowadź stany magazynowe: zaznaczone
+- [ ] Zezwalaj na sprzedaż: zaznaczone
+- [ ] Zezwalaj na zakup: odznaczone
+
+Zapisz produkt.",
+Heading 2 (## text),Nagłówek 2 (## tekst),
+Heading 3 (### text),Nagłówek 3 (### tekst),
+In this lab you will create a new customer and issue a sales invoice in the ERP system.,W tym labie utworzysz nowego klienta i wystawisz fakturę sprzedaży w systemie ERP.,
+Inline code,Kod inline,
+Inline code (`code`),Kod inline (`kod`),
+Insert copyable code unique per student: {company_name}-SUFFIX,Wstaw kopiowalny kod unikalny per student: {company_name}-SUFFIX,
+Instructions (student view),Instrukcje (widok studenta),
+Italic (*text*),Kursywa (*tekst*),
+Item + Stock Entry,Produkt + księgowanie magazynowe,
+Item code,Kod pozycji,
+Item created,Produkt utworzony,
+Key,Klucz,
+Lab Connection not selected,Nie wybrano połączenia laboratorium,
+Lab Connection selected,Wybrano połączenie laboratorium,
+Lab Connection unreachable — check settings,Połączenie laboratorium niedostępne — sprawdź ustawienia,
+Lab Connection verified,Połączenie laboratorium zweryfikowane,
+Leave empty for existence check,Zostaw puste dla sprawdzenia istnienia,
+NIP / VAT number,NIP / numer VAT,
+No URL parameters,Brak parametrów URL,
+No evaluation criteria,Brak kryteriów oceny,
+No filters — all records of this DocType will match,Brak filtrów — dopasują się wszystkie rekordy tego DocType,
+No steps to preview,Brak kroków do podglądu,
+No task steps — add at least one Step,Brak kroków zadaniowych — dodaj co najmniej jeden krok,
+Order,Zamówienie,
+Order quantity,Ilość zamówienia,
+Ordered list,Lista numerowana,
+Ordered list (1. item),Lista numerowana (1. pozycja),
+Passing: {0}%,Próg zaliczenia: {0}%,
+Passing: {0}% = min. {1}/{2} pts,Próg zaliczenia: {0}% = min. {1}/{2} pkt,
+Prefixed code,Kod z prefiksem,
+Product,Produkt,
+Product FG (session-prefixed code),Produkt gotowy (kod z prefiksem sesji),
+Product code (item_name + token),Kod produktu (item_name + token),
+"Product group, e.g. Products","Grupa produktów, np. Products",
+Random Polish company name (customer),Losowa polska nazwa firmy (klient),
+Random product name,Losowa nazwa produktu,
+"Record a stock receipt for item **{item_code}**, quantity **{order_qty}**.","Zaksięguj przyjęcie magazynowe produktu **{item_code}**, ilość **{order_qty}**.",
+Refresh preview data,Odśwież dane podglądu,
+Role not found on the external system.,Rola nie znaleziona w systemie zewnętrznym.,
+Sales Invoice exists,Faktura sprzedaży istnieje,
+Sales Order,Zlecenie sprzedaży,
+Sales Order exists,Zlecenie sprzedaży istnieje,
+"Sales territory, e.g. Poland","Region sprzedaży, np. Poland",
+Select DocType…,Wybierz DocType…,
+Selling price (PLN),Cena sprzedaży (PLN),
+Set passing percentage after adding criteria,Ustaw próg zaliczenia po dodaniu kryteriów,
+Stock Entry,Księgowanie magazynowe,
+Stock Entry submitted,Księgowanie magazynowe zatwierdzone,
+Student created a sales invoice for the customer,Student utworzył fakturę sprzedaży dla klienta,
+Student created the customer with the assigned name,Student utworzył klienta z przypisaną nazwą,
+Student created the finished product with their session-prefixed item code,Student utworzył produkt gotowy ze swoim kodem z prefiksem sesji,
+Student preview,Podgląd studenta,
+Template applied,Szablon zastosowany,
+Test Lab,Testuj lab,
+This role is assigned more than once.,Ta rola jest przypisana więcej niż raz.,
+Title set,Tytuł ustawiony,
+Total points is 0 — students cannot pass,Suma punktów wynosi 0 — studenci nie mogą zaliczyć,
+Total: {0} pts,Razem: {0} pkt,
+URL Parameters,Parametry URL,
+"Unit of measure, e.g. Nos","Jednostka miary, np. Nos",
+Unordered list,Lista nienumerowana,
+Unordered list (- item),Lista nienumerowana (- pozycja),
+"Use ""{0}""","Użyj „{0}""",
+Use +[label](value) for copyable chips.,Użyj +[etykieta](wartość) dla chipów do kopiowania.,
+Value or {placeholder},Wartość lub {placeholder},
+Variables,Zmienne,
+"e.g. Sales User, Accounts User","np. Sales User, Accounts User",
+step to complete,krok do wykonania,
+{0} criteria · {1} pts total,{0} kryteriów · {1} pkt łącznie,
+{0} criterion/criteria without company filter — students may match others' data,{0} kryterium/kryteriów bez filtra firmy — system może dopasować dane innego studenta,
+{0} exists,{0} istnieje,
+{0} task step(s),{0} krok(ów) zadaniowych,
+— cannot pass with 0 points,— nie można zaliczyć przy 0 punktach,
+• List,• Lista,
+☐ Checkbox,☐ Pole wyboru,
