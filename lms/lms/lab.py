@@ -222,6 +222,8 @@ def get_doctype_fields(lab_connection: str, doctype: str) -> list:
 			"fieldname": f.get("fieldname"),
 			"label": f.get("label") or f.get("fieldname"),
 			"fieldtype": f.get("fieldtype"),
+			"options": f.get("options") or "",
+			"reqd": bool(f.get("reqd")),
 		}
 		for f in fields
 		if f.get("fieldname") and f.get("fieldtype") not in _SKIP_FIELD_TYPES
@@ -251,6 +253,31 @@ def test_lab_connection(lab_connection: str) -> dict:
 		return {"ok": False, "message": str(exc)}
 
 
+def _preview_seed_placeholders(lab_doc, company_name: str, ext_username: str, session_data: dict) -> None:
+	"""
+	Preview-only stand-in for _create_seed_records: fills in {label}/{label.fieldname}
+	placeholders without POSTing to the external system. Approximates {label} with the
+	row's first substituted field, since no real name is assigned. Mutates session_data
+	in place, same contract as _create_seed_records.
+	"""
+	subs = {"company_name": company_name, "username": ext_username, **session_data}
+	for row in getattr(lab_doc, "seed_records", None) or []:
+		if not row.label:
+			continue
+		try:
+			raw_values = json.loads(row.field_values or "{}")
+		except (ValueError, TypeError):
+			continue
+
+		payload = _apply_substitutions_deep(raw_values, subs)
+		# Only scalar fields make a usable {label.fieldname} value.
+		scalar_fields = {k: v for k, v in payload.items() if v is not None and not isinstance(v, (dict, list))}
+		preview_name = next(iter(scalar_fields.values()), None) or f"{row.target_doctype}-preview"
+		subs[row.label] = session_data[row.label] = str(preview_name)
+		for fieldname, value in scalar_fields.items():
+			subs[f"{row.label}.{fieldname}"] = session_data[f"{row.label}.{fieldname}"] = str(value)
+
+
 @frappe.whitelist()
 def get_lab_preview(lab: str) -> dict:
 	"""Sample lab session payload for instructor preview — no provisioning."""
@@ -264,6 +291,13 @@ def get_lab_preview(lab: str) -> dict:
 
 	session_data = _generate_session_data("preview")
 	prefix = (doc.company_prefix or "Lab").strip() or "Lab"
+	company_name = f"{prefix}_preview_user"
+	ext_username = "preview.user"
+	# Hardcoded since preview has no real session id to derive company_abbr from.
+	session_data["company_abbr"] = "PREVW"
+	session_data["today"] = str(now_datetime().date())
+	session_data["delivery_date"] = str(add_to_date(now_datetime(), days=7).date())
+	_preview_seed_placeholders(doc, company_name, ext_username, session_data)
 	steps = []
 	for idx, step in enumerate(doc.steps or [], start=1):
 		row = step.as_dict()
@@ -274,8 +308,8 @@ def get_lab_preview(lab: str) -> dict:
 		"preview": True,
 		"lab_title": doc.title,
 		"url": conn_url.rstrip("/"),
-		"company_name": f"{prefix}_preview_user",
-		"external_username": "preview.user",
+		"company_name": company_name,
+		"external_username": ext_username,
 		"external_password": "preview123",
 		"expires_at": add_to_date(now_datetime(), minutes=doc.max_session_minutes or 60),
 		"session_data": session_data,
@@ -335,7 +369,8 @@ def _ensure_owner_restricted(base_url, admin_key, admin_secret, role: str, docty
 def ensure_role_isolation(lab_doc) -> None:
 	"""
 	Restricts each role assigned to this lab's students so they only see documents
-	they own across SESSION_DOCTYPES (Customer, Item, Address, Sales Order, ...) —
+	they own across SESSION_DOCTYPES (Customer, Item, Address, Sales Order, ...) plus
+	any doctype this lab's Seed Records target that isn't already in that list —
 	otherwise every student sees every other student's (and any pre-existing demo)
 	data on the external system, which defeats the point of a sandboxed lab session.
 	Best-effort and non-blocking: failures here shouldn't stop a lab from being saved.
@@ -351,6 +386,13 @@ def ensure_role_isolation(lab_doc) -> None:
 	if not role_names:
 		return
 
+	seed_doctypes = {
+		row.target_doctype.strip()
+		for row in (getattr(lab_doc, "seed_records", None) or [])
+		if getattr(row, "target_doctype", None) and row.target_doctype.strip()
+	}
+	doctypes = [*SESSION_DOCTYPES, *sorted(seed_doctypes - set(SESSION_DOCTYPES))]
+
 	try:
 		base_url, admin_key, admin_secret = _load_connection(lab_doc.lab_connection)
 	except Exception:
@@ -358,7 +400,7 @@ def ensure_role_isolation(lab_doc) -> None:
 
 	failed = False
 	for role in role_names:
-		for doctype in SESSION_DOCTYPES:
+		for doctype in doctypes:
 			try:
 				if not _ensure_owner_restricted(base_url, admin_key, admin_secret, role, doctype):
 					failed = True
@@ -558,6 +600,18 @@ def _generate_session_data(token: str) -> dict:
 	}
 
 
+# Keys _generate_session_data() produces, plus the extra placeholders provisioning adds
+# on top (company_abbr, today, delivery_date) and the two identity placeholders — every
+# built-in {placeholder} a Seed Record label must not be allowed to collide with.
+RESERVED_SESSION_PLACEHOLDERS = frozenset(_generate_session_data("X").keys()) | {
+	"company_name",
+	"username",
+	"company_abbr",
+	"today",
+	"delivery_date",
+}
+
+
 def _load_session_data(instance) -> dict:
 	"""Return the parsed session_data dict for an instance (doc or row)."""
 	raw = instance.get("session_data") if hasattr(instance, "get") else getattr(instance, "session_data", None)
@@ -567,6 +621,22 @@ def _load_session_data(instance) -> dict:
 		return json.loads(raw)
 	except (ValueError, TypeError):
 		return {}
+
+
+def _load_seed_records(instance) -> list:
+	"""Return the parsed created_seed_records list ([{"doctype":..., "name":...}]) for an instance."""
+	raw = (
+		instance.get("created_seed_records")
+		if hasattr(instance, "get")
+		else getattr(instance, "created_seed_records", None)
+	)
+	if not raw:
+		return []
+	try:
+		data = json.loads(raw)
+	except (ValueError, TypeError):
+		return []
+	return data if isinstance(data, list) else []
 
 
 def _build_substitutions(instance, session_data: dict = None) -> dict:
@@ -594,6 +664,18 @@ def _apply_substitutions(text: str, subs: dict) -> str:
 	return text
 
 
+def _apply_substitutions_deep(value, subs: dict):
+	"""Like _apply_substitutions, but recurses into lists/dicts (e.g. a BOM's child-table
+	rows). Only string leaves get substituted; other types pass through unchanged."""
+	if isinstance(value, str):
+		return _apply_substitutions(value, subs)
+	if isinstance(value, list):
+		return [_apply_substitutions_deep(v, subs) for v in value]
+	if isinstance(value, dict):
+		return {k: _apply_substitutions_deep(v, subs) for k, v in value.items()}
+	return value
+
+
 def _step_to_dict(s):
 	"""Serialize a LMS Lab Step child row to a plain dict for the API response."""
 	return {
@@ -604,6 +686,65 @@ def _step_to_dict(s):
 		"autocomplete_nav_params": getattr(s, "autocomplete_nav_params", None) or "",
 		"idx": s.idx,
 	}
+
+
+class SeedRecordCreationError(Exception):
+	"""Raised by _create_seed_records on failure. Carries the records already created
+	so the caller can persist them for cleanup instead of orphaning them."""
+
+	def __init__(self, message: str, created: list):
+		super().__init__(message)
+		self.created = created
+
+
+def _create_seed_records(lab_doc, base_url, admin_key, admin_secret, company_name, ext_username, session_data: dict) -> list:
+	"""
+	Pre-creates the lab's configured Seed Records on the external system before the
+	student logs in, so the lab can hand them data that's supposed to already exist.
+
+	Rows are processed in table order so a later row can reference an earlier row's
+	Label as a {placeholder}. Mutates session_data in place with `{label}` (the actual
+	created name) and `{label.fieldname}` for each field on the created document.
+
+	Returns the {"doctype", "name"} pairs created, for the caller to persist for cleanup.
+	Raises SeedRecordCreationError (carrying whatever was created so far) on failure.
+	"""
+	subs = {"company_name": company_name, "username": ext_username, **session_data}
+	created = []
+	for row in getattr(lab_doc, "seed_records", None) or []:
+		try:
+			raw_values = json.loads(row.field_values or "{}")
+		except (ValueError, TypeError):
+			raise SeedRecordCreationError(
+				_("Invalid JSON in seed record '{0}': Field Values").format(row.label), created
+			)
+
+		payload = {k: _apply_substitutions_deep(v, subs) for k, v in raw_values.items()}
+		# Force the owner so the record is visible under the student's owner-isolated role.
+		payload["owner"] = ext_username
+
+		resp = _external_request(
+			"POST", f"{base_url}/api/resource/{row.target_doctype}", admin_key, admin_secret, json=payload
+		)
+		if resp.status_code not in (200, 201):
+			raise SeedRecordCreationError(
+				_("Failed to pre-create {0} '{1}': {2}").format(
+					row.target_doctype, row.label, _external_error_detail(resp)
+				),
+				created,
+			)
+
+		created_doc = (resp.json() or {}).get("data") or {}
+		created_name = created_doc.get("name")
+		subs[row.label] = session_data[row.label] = created_name
+		created.append({"doctype": row.target_doctype, "name": created_name})
+
+		for fieldname, value in created_doc.items():
+			if value is None or isinstance(value, (dict, list)):
+				continue  # no sensible string form for a {placeholder}
+			subs[f"{row.label}.{fieldname}"] = session_data[f"{row.label}.{fieldname}"] = str(value)
+
+	return created
 
 
 def _get_lab_doc(lab: str):
@@ -651,6 +792,15 @@ def _get_lab_doc(lab: str):
 			doc.evaluation_criteria = [types.SimpleNamespace(**c) for c in criteria_raw]
 		except Exception:
 			doc.evaluation_criteria = []
+		try:
+			seed_records_raw = frappe.db.sql(
+				"SELECT * FROM `tabLMS Lab Seed Record` WHERE parent=%s ORDER BY idx",
+				lab,
+				as_dict=True,
+			)
+			doc.seed_records = [types.SimpleNamespace(**s) for s in seed_records_raw]
+		except Exception:
+			doc.seed_records = []
 		return doc
 
 
@@ -778,6 +928,11 @@ def provision_lab_instance(lab: str, course: str, lesson: str):
 	company_abbr = re.sub(r"[^A-Za-z0-9]", "", session_id)[:5].upper()
 	ext_username = f"lab-{session_id}@lab.local"
 	session_data = _generate_session_data(token)
+	# Exposes the short suffix ERPNext appends to auto-created records (e.g. "Stores - PG5NU").
+	session_data["company_abbr"] = company_abbr
+	# For Seed Records to date-stamp documents (e.g. a Sales Order's delivery_date).
+	session_data["today"] = str(now_datetime().date())
+	session_data["delivery_date"] = str(add_to_date(now_datetime(), days=7).date())
 
 	frappe.db.set_value(
 		"LMS Lab Instance",
@@ -860,6 +1015,12 @@ def provision_lab_instance(lab: str, course: str, lesson: str):
 			json=user_perm_payload,
 		)
 
+		# 4. Pre-create the lab's configured Seed Records, after Company/User exist since
+		# field_values may reference {company_name}/{username}.
+		created_seed_records = _create_seed_records(
+			lab_doc, base_url, admin_key, admin_secret, company_name, ext_username, session_data
+		)
+
 		# 5. Generate API keys for the new user
 		resp = _external_request(
 			"POST",
@@ -888,19 +1049,20 @@ def provision_lab_instance(lab: str, course: str, lesson: str):
 				"api_secret": ext_api_secret,
 				"provisioned_at": now,
 				"expires_at": expires_at,
+				# session_data gained {label: created_name} entries in _create_seed_records above.
+				"session_data": json.dumps(session_data, ensure_ascii=False),
+				"created_seed_records": json.dumps(created_seed_records, ensure_ascii=False),
 			},
 		)
 		frappe.db.commit()
 
 	except Exception as e:
-		frappe.db.set_value(
-			"LMS Lab Instance",
-			instance.name,
-			{
-				"status": "Failed",
-				"error_log": str(e),
-			},
-		)
+		updates = {"status": "Failed", "error_log": str(e)}
+		if isinstance(e, SeedRecordCreationError) and e.created:
+			# Persist whatever seed records were created before the failure, so cleanup
+			# can find and delete them instead of leaving them orphaned on the external system.
+			updates["created_seed_records"] = json.dumps(e.created, ensure_ascii=False)
+		frappe.db.set_value("LMS Lab Instance", instance.name, updates)
 		frappe.db.commit()
 		raise
 
@@ -1251,13 +1413,17 @@ def cleanup_lab_instance(
 		if not frappe.has_permission("LMS Lab Instance", "write"):
 			frappe.throw(_("Not authorized."))
 
+	# Captured before _do_cleanup overwrites error_log, to detect "same residue as last attempt".
+	previous_error_log = instance.error_log
+
 	frappe.db.set_value("LMS Lab Instance", lab_instance, "status", "Cleaning")
 	frappe.db.commit()
 
-	if not base_url or not admin_key or not admin_secret:
-		base_url, admin_key, admin_secret = _get_connection(instance.lab)
-
 	try:
+		# Must stay inside the try: a connection failure here should also mark "Failed",
+		# not leave the instance stuck on "Cleaning" (only "Failed" is ever retried).
+		if not base_url or not admin_key or not admin_secret:
+			base_url, admin_key, admin_secret = _get_connection(instance.lab)
 		result = _do_cleanup(lab_instance, instance, base_url, admin_key, admin_secret)
 	except Exception as e:
 		# Without this, anything that interrupts cleanup mid-run (a timed-out request, a
@@ -1270,10 +1436,11 @@ def cleanup_lab_instance(
 		_notify_cleanup_failure(instance, str(e))
 		raise
 
-	if result.get("errors"):
-		# The student can't act on this — only someone with access to the external
-		# system can — so they're never shown it; course staff get notified instead.
-		_notify_cleanup_failure(instance, "\n".join(result["errors"]))
+	new_error_log = "\n".join(result["errors"]) if result.get("errors") else ""
+	if new_error_log and new_error_log != previous_error_log:
+		# Course staff get notified, not the student. Skipped when unchanged from the
+		# previous attempt, so daily retries of permanently-stuck residue don't spam.
+		_notify_cleanup_failure(instance, new_error_log)
 	return result
 
 
@@ -1352,14 +1519,49 @@ def _do_cleanup(lab_instance: str, instance, base_url: str, admin_key: str, admi
 		except requests.exceptions.RequestException:
 			pass
 
+	def _clear_company_account_links(company):
+		"""
+		Company holds ~40 Link fields to its own default Chart of Accounts/Cost Center/
+		Warehouse; while set, those report "linked with Company" and can never be deleted.
+		Clearing them here breaks that circular block before draining. Best-effort: a few
+		fields get re-populated by Company's own validate() if left blank, so those
+		accounts (and Company itself) stay undeletable — a platform limitation.
+		"""
+		try:
+			resp = _raw_external_request(
+				"GET", f"{base_url}/api/resource/DocType/Company", admin_key, admin_secret, timeout=30
+			)
+			if resp.status_code != 200:
+				return
+			meta_fields = resp.json().get("data", {}).get("fields", [])
+			clear_fields = [
+				f["fieldname"]
+				for f in meta_fields
+				if f.get("fieldtype") == "Link" and f.get("options") in ("Account", "Cost Center", "Warehouse")
+			]
+			if not clear_fields:
+				return
+			_raw_external_request(
+				"PUT",
+				f"{base_url}/api/resource/Company/{company}",
+				admin_key,
+				admin_secret,
+				json={fn: "" for fn in clear_fields},
+				timeout=30,
+			)
+		except requests.exceptions.RequestException:
+			pass
+
 	def _delete_doc(doctype, name) -> bool:
+		"""404 counts as success too, so re-running cleanup on a partially-cleaned
+		instance doesn't report already-deleted docs as freshly stuck."""
 		try:
 			resp = _raw_external_request(
 				"DELETE", f"{base_url}/api/resource/{doctype}/{name}", admin_key, admin_secret, timeout=30
 			)
 		except requests.exceptions.RequestException:
 			return False
-		return resp.status_code in (200, 202)
+		return resp.status_code in (200, 202, 404)
 
 	def _discover_linked(doctype, name):
 		"""
@@ -1410,12 +1612,11 @@ def _do_cleanup(lab_instance: str, instance, base_url: str, admin_key: str, admi
 			if not frontier:
 				break
 
-	def _drain(todo: set, max_passes: int = 8):
+	def _drain(todo: set, max_passes: int = 25) -> set:
 		"""
-		Repeatedly try to cancel+delete every (doctype, name) in `todo`. Each pass clears
-		whatever is no longer blocked by a link to something deleted in a previous pass,
-		so this self-resolves dependency ordering instead of relying on a hand-curated
-		doctype order. Whatever is still stuck after `max_passes` is reported as an error.
+		Repeatedly cancel+delete every (doctype, name) in `todo` until nothing more clears,
+		self-resolving dependency order. Returns what's still stuck; does NOT mutate `todo`
+		— callers looping over rounds must chain the returned set, not reuse `todo`.
 		"""
 		remaining = set(todo)
 		for _pass in range(max_passes):
@@ -1429,8 +1630,7 @@ def _do_cleanup(lab_instance: str, instance, base_url: str, admin_key: str, admi
 					progressed = True
 			if not progressed:
 				break
-		for doctype, name in remaining:
-			errors.append(f"{doctype} {name}: still linked/blocked after {max_passes} cleanup passes")
+		return remaining
 
 	# 1. Seed the to-delete set from documents directly owned by the lab user...
 	todo = set()
@@ -1449,27 +1649,61 @@ def _do_cleanup(lab_instance: str, instance, base_url: str, admin_key: str, admi
 	except Exception as e:
 		errors.append(f"User Permission: {str(e)}")
 
-	# 2. Walk the link graph from the company and from every document found so far —
-	# catches GL Entry/Stock Ledger Entry/etc. and anything not in CLEANUP_DOCTYPES.
-	_expand_linked(todo, [("Company", company_name), *todo])
+	# ...plus every Seed Record pre-created during provisioning (a seed's target_doctype
+	# isn't necessarily in SESSION_DOCTYPES, so it's tracked explicitly on the instance).
+	for rec in _load_seed_records(instance):
+		if rec.get("doctype") and rec.get("name"):
+			todo.add((rec["doctype"], rec["name"]))
 
-	# 3. Cancel+delete everything found, retrying until nothing more can be cleared.
-	_drain(todo)
+	# 2-4. Discover + drain in a loop: a single pass misses links that only appear once
+	# something else in the same set is deleted. `deleted` tracks confirmed-gone pairs
+	# so they're never re-attempted or reused as a BFS seed.
+	deleted: set = set()
+	stuck: set = set()
+	for _round in range(4):
+		seeds = [("Company", company_name), *(stuck if _round else todo)]
+		_expand_linked(todo, seeds)
 
-	# 4. Delete the company — by now its own dependents (Account, Cost Center,
-	# Warehouse, ...) should be gone too, either via step 3 or via Company's own
+		# Breaks Company's circular block on its own default Account/Cost Center/Warehouse links.
+		_clear_company_account_links(company_name)
+
+		# Ledger/audit doctypes aren't surfaced by _discover_linked (no dashboard
+		# "Connections" entry), so query them explicitly by company.
+		for ledger_doctype in ("GL Entry", "Payment Ledger Entry", "Stock Ledger Entry", "Repost Item Valuation"):
+			try:
+				for name in _fetch_names_by_filter(ledger_doctype, "company", company_name):
+					todo.add((ledger_doctype, name))
+			except Exception as e:
+				errors.append(f"{ledger_doctype}: {str(e)}")
+
+		to_attempt = todo - deleted
+		stuck = _drain(to_attempt)
+		deleted |= to_attempt - stuck
+		if stuck == to_attempt:
+			# Nothing at all got deleted this round — further rounds won't help either.
+			break
+
+	for doctype, name in sorted(stuck):
+		errors.append(f"{doctype} {name}: still linked/blocked after cleanup")
+
+	# 5. Delete the company — by now its own dependents (Account, Cost Center,
+	# Warehouse, ...) should be gone too, either via step 4 or via Company's own
 	# on_trash cleanup, which only runs once no GL Entry/Stock Ledger Entry remains.
 	# Routed through _drain (not a single _delete_doc call) so a transient failure on
 	# the external system gets retried instead of being reported as permanently stuck.
-	_drain({("Company", company_name)})
+	company_stuck = _drain({("Company", company_name)})
+	for doctype, name in sorted(company_stuck):
+		errors.append(f"{doctype} {name}: still linked/blocked after cleanup")
 
-	# 5. Delete the user — walk its link graph too (ToDo, assignments, and other core
+	# 6. Delete the user — walk its link graph too (ToDo, assignments, and other core
 	# housekeeping records aren't owned by the user, they just point at it) and drain
 	# that before the final delete.
 	user_todo = set()
 	_expand_linked(user_todo, [("User", ext_username)])
 	user_todo.add(("User", ext_username))
-	_drain(user_todo)
+	user_stuck = _drain(user_todo)
+	for doctype, name in sorted(user_stuck):
+		errors.append(f"{doctype} {name}: still linked/blocked after cleanup")
 
 	frappe.db.set_value(
 		"LMS Lab Instance",
@@ -1498,3 +1732,23 @@ def cleanup_expired_instances():
 			cleanup_lab_instance(inst.name)
 		except Exception as e:
 			frappe.log_error(f"Lab cleanup failed for {inst.name}: {str(e)}", "Lab Cleanup Error")
+
+
+def retry_stuck_cleanups():
+	"""
+	Scheduled job: re-run cleanup for instances stuck "Cleaned" with residue in error_log.
+	Some residue (e.g. a Repost Item Valuation ERPNext blocks from deletion for up to an
+	hour) clears on its own with time; some (e.g. Company's self-healing default accounts)
+	never does — cleanup_lab_instance() only re-notifies staff when the error text changes,
+	so retrying daily doesn't spam.
+	"""
+	stuck = frappe.get_all(
+		"LMS Lab Instance",
+		filters={"status": "Cleaned", "error_log": ["!=", ""]},
+		fields=["name"],
+	)
+	for inst in stuck:
+		try:
+			cleanup_lab_instance(inst.name)
+		except Exception as e:
+			frappe.log_error(f"Lab cleanup retry failed for {inst.name}: {str(e)}", "Lab Cleanup Error")

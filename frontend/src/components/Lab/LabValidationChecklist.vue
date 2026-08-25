@@ -17,6 +17,7 @@
 <script setup>
 import { computed } from 'vue'
 import { Check, X, AlertTriangle } from 'lucide-vue-next'
+import { PLACEHOLDER_RE } from '@/utils/labTokens'
 
 const props = defineProps({
 	lab: { type: Object, default: null },
@@ -36,6 +37,13 @@ const criteriaWithoutCompany = computed(() =>
 		// Item has no company field — session-prefixed item_code isolates students
 		if (c.doctype_to_check.toLowerCase() === 'item' && filters.includes('{company_name}')) return false
 		return true
+	}).length
+)
+
+const seedRecordsWithoutPlaceholder = computed(() =>
+	(props.lab?.seed_records || []).filter((r) => {
+		if (!r.label?.trim()) return false
+		return !PLACEHOLDER_RE.test(r.field_values || '')
 	}).length
 )
 
@@ -104,6 +112,17 @@ const items = computed(() => {
 			warn: true,
 			label: __('{0} criterion/criteria without company filter — students may match others\' data').format(
 				criteriaWithoutCompany.value,
+			),
+		})
+	}
+
+	if (seedRecordsWithoutPlaceholder.value > 0) {
+		list.push({
+			id: 'seed-placeholder',
+			ok: false,
+			warn: true,
+			label: __('{0} seed record(s) with no placeholder value — concurrent students would collide').format(
+				seedRecordsWithoutPlaceholder.value,
 			),
 		})
 	}

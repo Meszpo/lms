@@ -19,6 +19,8 @@
   "description",
   "section_break_roles",
   "roles",
+  "section_break_seed_records",
+  "seed_records",
   "section_break_steps",
   "steps",
   "section_break_criteria",
@@ -99,6 +101,18 @@
    "label": "Roles",
    "options": "LMS Lab Role",
    "description": "Roles assigned to the provisioned student user on the external system. Defaults to 'System Manager' if none specified."
+  },
+  {
+   "fieldname": "section_break_seed_records",
+   "fieldtype": "Section Break",
+   "label": "Seed Data"
+  },
+  {
+   "fieldname": "seed_records",
+   "fieldtype": "Table",
+   "label": "Seed Records",
+   "options": "LMS Lab Seed Record",
+   "description": "Records pre-created on the external system during provisioning, before the student logs in (e.g. an existing customer they must look up rather than create). Each row's Label becomes a {placeholder} available in step instructions and evaluation criteria."
   },
   {
    "fieldname": "section_break_steps",

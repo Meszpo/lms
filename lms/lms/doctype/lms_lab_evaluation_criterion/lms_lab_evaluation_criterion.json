@@ -63,7 +63,7 @@
    "fieldtype": "Code",
    "label": "Filters (JSON)",
    "options": "JSON",
-   "description": "Frappe-compatible filters array. Use {company_name} and {username} as placeholders."
+   "description": "Frappe-compatible filters array. Placeholders: {company_name}, {company_abbr}, {username}, any randomized session field (e.g. {customer_name}), any Seed Record's Label (e.g. {existing_customer}), and {label.fieldname} for a specific field on that Seed Record's created document (e.g. {existing_customer.customer_group})."
   },
   {
    "fieldname": "column_break_3",

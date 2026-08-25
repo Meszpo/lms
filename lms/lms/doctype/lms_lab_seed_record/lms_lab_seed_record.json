@@ -1,0 +1,69 @@
+{
+ "actions": [],
+ "creation": "2026-08-25 10:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "label",
+  "target_doctype",
+  "column_break_1",
+  "description",
+  "section_break_2",
+  "field_values"
+ ],
+ "fields": [
+  {
+   "fieldname": "label",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Label",
+   "reqd": 1,
+   "description": "Placeholder key for the created record, e.g. 'existing_customer' → {existing_customer} (the record's name) or {existing_customer.customer_group} (any field on the created record, as returned by the external system) in step instructions and evaluation criteria."
+  },
+  {
+   "fieldname": "target_doctype",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Target DocType",
+   "reqd": 1,
+   "description": "DocType on the external lab system to create this record in, e.g. 'Customer'."
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Description",
+   "description": "Human-readable note about what this pre-created record represents for the student."
+  },
+  {
+   "fieldname": "section_break_2",
+   "fieldtype": "Section Break",
+   "label": "Field Values"
+  },
+  {
+   "fieldname": "field_values",
+   "fieldtype": "Code",
+   "label": "Field Values (JSON)",
+   "options": "JSON",
+   "reqd": 1,
+   "description": "Fields to set on the created record. Values may use {placeholder} referencing session data or an earlier seed record's Label. Must reference at least one placeholder so concurrent students don't collide. Edit via the visual builder in the lab editor rather than by hand."
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-25 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "LMS",
+ "name": "LMS Lab Seed Record",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

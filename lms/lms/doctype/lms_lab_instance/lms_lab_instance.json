@@ -21,6 +21,7 @@
   "api_secret",
   "section_break_data",
   "session_data",
+  "created_seed_records",
   "section_break_log",
   "error_log"
  ],
@@ -121,6 +122,14 @@
    "options": "JSON",
    "read_only": 1,
    "description": "Randomized per-session values (customer, item, address...) substituted into instructions and evaluation criteria."
+  },
+  {
+   "fieldname": "created_seed_records",
+   "fieldtype": "Code",
+   "label": "Created Seed Records (JSON)",
+   "options": "JSON",
+   "read_only": 1,
+   "description": "Records pre-created on the external system during provisioning (from the Lab's Seed Records config), tracked here so cleanup can remove them."
   },
   {
    "fieldname": "section_break_log",

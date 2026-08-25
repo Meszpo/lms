@@ -127,6 +127,71 @@
 					</div>
 				</template>
 
+				<!-- SEED DATA TAB -->
+				<template v-if="activeTab === 'seed'">
+					<div class="flex items-center justify-between mb-2">
+						<div>
+							<h2 class="text-lg font-semibold text-ink-gray-9">{{ __('Seed Data') }}</h2>
+							<p class="text-xs text-ink-gray-5 mt-0.5">
+								{{ __('Records pre-created on the external system during provisioning, before the student logs in — e.g. an existing customer they must look up rather than create.') }}
+							</p>
+						</div>
+						<Button @click="addSeedRecord">
+							<template #prefix><Plus class="w-4 h-4" /></template>
+							{{ __('Add Seed Record') }}
+						</Button>
+					</div>
+					<Draggable
+						v-if="lab.seed_records?.length"
+						v-model="lab.seed_records"
+						item-key="name"
+						handle=".seed-drag-handle"
+						@end="isDirty = true"
+						class="space-y-2"
+					>
+						<template #item="{ element: seedRecord, index: idx }">
+							<div class="border rounded-lg bg-surface-gray-1 overflow-hidden">
+								<div
+									class="flex items-start gap-2 p-3 cursor-pointer hover:bg-surface-gray-2"
+									@click="toggleExpandedSeedRecord(idx)"
+								>
+									<GripVertical class="seed-drag-handle w-4 h-4 text-ink-gray-4 shrink-0 mt-1 cursor-grab" />
+									<div class="flex-1 min-w-0">
+										<div class="font-medium text-ink-gray-9 text-sm">
+											{{ seedRecord.label || __('(unlabeled)') }}
+										</div>
+										<div class="text-xs text-ink-gray-5 mt-0.5 flex flex-wrap gap-2">
+											<span>{{ seedRecord.target_doctype || __('(no doctype)') }}</span>
+										</div>
+									</div>
+									<div class="flex items-center gap-1 shrink-0">
+										<Button variant="ghost" size="sm" :title="__('Duplicate')" @click.stop="duplicateSeedRecord(idx)">
+											<Copy class="w-3.5 h-3.5 text-ink-gray-5" />
+										</Button>
+										<Button variant="ghost" size="sm" @click.stop="removeSeedRecord(idx)">
+											<X class="w-3.5 h-3.5 stroke-1.5 text-ink-gray-5" />
+										</Button>
+										<ChevronDown
+											class="w-4 h-4 text-ink-gray-4 transition-transform"
+											:class="{ 'rotate-180': expandedSeedRecordIdx === idx }"
+										/>
+									</div>
+								</div>
+								<div v-if="expandedSeedRecordIdx === idx" class="px-4 pb-4">
+									<LabSeedRecordEditor
+										:seed-record="seedRecord"
+										:lab-connection="lab.lab_connection"
+										:external-doctypes="externalDoctypes"
+										:prior-records="priorSeedRecordsFor(idx)"
+										@dirty="isDirty = true"
+									/>
+								</div>
+							</div>
+						</template>
+					</Draggable>
+					<p v-else class="text-sm text-ink-gray-5">{{ __('No seed records configured yet.') }}</p>
+				</template>
+
 				<!-- STEPS TAB -->
 				<template v-if="activeTab === 'steps'">
 					<div class="flex items-center justify-between mb-2">
@@ -386,6 +451,7 @@ import PageHeader from '@/components/Layouts/PageHeader.vue'
 import HeaderButton from '@/components/HeaderButton.vue'
 import LabStepEditor from '@/components/Lab/LabStepEditor.vue'
 import LabCriterionEditor from '@/components/Lab/LabCriterionEditor.vue'
+import LabSeedRecordEditor from '@/components/Lab/LabSeedRecordEditor.vue'
 import LabPreviewPanel from '@/components/Lab/LabPreviewPanel.vue'
 import LabValidationChecklist from '@/components/Lab/LabValidationChecklist.vue'
 import { getLmsRoute } from '@/utils/basePath'
@@ -400,6 +466,7 @@ const saving = ref(false)
 const activeTab = ref('basics')
 const expandedStepIdx = ref(null)
 const expandedCriterionIdx = ref(null)
+const expandedSeedRecordIdx = ref(null)
 const descTextareaRef = ref(null)
 const connectionStatus = ref(null)
 const loadingPreview = ref(false)
@@ -413,6 +480,7 @@ const props = defineProps({
 
 const tabs = computed(() => [
 	{ id: 'basics', label: __('Basics') },
+	{ id: 'seed', label: __('Seed Data'), count: lab.value?.seed_records?.length || 0 },
 	{ id: 'steps', label: __('Steps'), count: lab.value?.steps?.length || 0 },
 	{ id: 'evaluation', label: __('Evaluation'), count: lab.value?.evaluation_criteria?.length || 0 },
 	{ id: 'preview', label: __('Preview') },
@@ -624,6 +692,43 @@ const totalCriteriaPoints = computed(() =>
 	(lab.value?.evaluation_criteria || []).reduce((sum, c) => sum + (Number(c.points) || 0), 0)
 )
 
+// Seed records
+function addSeedRecord() {
+	if (!lab.value.seed_records) lab.value.seed_records = []
+	lab.value.seed_records.push({
+		doctype: 'LMS Lab Seed Record',
+		label: '',
+		target_doctype: '',
+		field_values: '',
+		description: '',
+	})
+	expandedSeedRecordIdx.value = lab.value.seed_records.length - 1
+	isDirty.value = true
+}
+
+function toggleExpandedSeedRecord(idx) {
+	expandedSeedRecordIdx.value = expandedSeedRecordIdx.value === idx ? null : idx
+}
+
+function removeSeedRecord(idx) {
+	lab.value.seed_records.splice(idx, 1)
+	if (expandedSeedRecordIdx.value === idx) expandedSeedRecordIdx.value = null
+	isDirty.value = true
+}
+
+function duplicateSeedRecord(idx) {
+	const src = lab.value.seed_records[idx]
+	const copy = { ...src, name: undefined, doctype: 'LMS Lab Seed Record' }
+	lab.value.seed_records.splice(idx + 1, 0, copy)
+	expandedSeedRecordIdx.value = idx + 1
+	isDirty.value = true
+}
+
+// Rows are created in table order, so only earlier rows' placeholders are available.
+function priorSeedRecordsFor(idx) {
+	return (lab.value?.seed_records || []).slice(0, idx).filter((r) => (r.label || '').trim())
+}
+
 // Connection & external data
 async function testConnection(connection) {
 	if (!connection) {
@@ -726,7 +831,9 @@ const roleOptionsFor = (idx) => {
 		query.toLowerCase() !== current.toLowerCase() &&
 		!options.some((o) => o.value.toLowerCase() === query.toLowerCase())
 	) {
-		options.unshift({ label: __('Use "{0}"').format(query), value: query })
+		// label must equal value — a decorated label causes an infinite resync loop with
+		// roleQueries above, freezing the tab.
+		options.unshift({ label: query, value: query })
 	}
 	return options
 }

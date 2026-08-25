@@ -32,7 +32,7 @@
    "fieldname": "instructions",
    "fieldtype": "Long Text",
    "label": "Instructions",
-   "description": "Use +[label](value) to add inline copyable chips. Placeholders: {company_name}, {username}, {password}, {url}"
+   "description": "Use +[label](value) to add inline copyable chips. Placeholders: {company_name}, {company_abbr}, {username}, {password}, {url}, any randomized session field (e.g. {customer_name}, {item_price} — see the Session Data field on a lab instance for the full list), any Seed Record's Label (e.g. {existing_customer}), and {label.fieldname} for a specific field on that Seed Record's created document (e.g. {existing_customer.customer_group})."
   },
   {
    "fieldname": "section_break_nav",
@@ -50,7 +50,7 @@
    "fieldtype": "Code",
    "label": "Navigate Params (JSON)",
    "options": "JSON",
-   "description": "URL params. Use {company_name}, {username} as placeholders."
+   "description": "URL params. Placeholders: {company_name}, {company_abbr}, {username}, any randomized session field (e.g. {customer_name}), any Seed Record's Label, and {label.fieldname} for a specific field on that Seed Record's created document."
   }
  ],
  "index_web_pages_for_search": 1,

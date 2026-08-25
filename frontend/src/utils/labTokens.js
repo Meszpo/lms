@@ -1,8 +1,14 @@
+import { parseNavParamsJson } from '@/utils/labNav'
+
+// Matches {label} and {label.fieldname}. Mirrors lms_lab.py's _PLACEHOLDER_RE.
+export const PLACEHOLDER_RE = /\{[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)?\}/
+
 /** Session-level placeholders (always available). */
 export const SESSION_TOKENS = [
 	{ value: '{username}', description: __("Student's login on the external system"), group: 'session', example: 'jan.kowalski' },
 	{ value: '{password}', description: __("Student's password on the external system"), group: 'session', example: '••••••' },
 	{ value: '{company_name}', description: __('Generated company name for this student (unique per session)'), group: 'session', example: 'LAB-abc123def' },
+	{ value: '{company_abbr}', description: __('Short company abbreviation ERPNext appends to warehouses/accounts (e.g. "Stores - PG5NU")'), group: 'session', example: 'PG5NU' },
 	{ value: '{url}', description: __('Base URL of the external system'), group: 'session', example: 'https://erp.example.com' },
 ]
 
@@ -28,6 +34,8 @@ export const SESSION_DATA_TOKENS = [
 	{ value: '{item_price}', description: __('Selling price (PLN)'), group: 'product', example: '2499.00' },
 	{ value: '{order_qty}', description: __('Order quantity'), group: 'order', example: '5' },
 	{ value: '{discount_pct}', description: __('Discount percentage'), group: 'order', example: '10' },
+	{ value: '{lead_first}', description: __('Random lead first name'), group: 'lead', example: 'Piotr' },
+	{ value: '{lead_company}', description: __('Random lead company name'), group: 'lead', example: 'Wisła Sp. z o.o. [abc123]' },
 ]
 
 export const TOKEN_GROUPS = [
@@ -37,18 +45,49 @@ export const TOKEN_GROUPS = [
 	{ id: 'address', label: __('Address') },
 	{ id: 'product', label: __('Product') },
 	{ id: 'order', label: __('Order') },
+	{ id: 'lead', label: __('Lead') },
+	{ id: 'seed', label: __('Seed Records') },
 ]
+
+/** Placeholders available for a Seed Record's Field Values: session tokens plus
+ * {label}/{label.fieldname} for each earlier seed row's own configured fields. */
+export function seedRecordTokens(priorRecords = []) {
+	const seedTokens = []
+	for (const record of priorRecords || []) {
+		const label = (record?.label || '').trim()
+		if (!label) continue
+		seedTokens.push({
+			value: `{${label}}`,
+			description: __('Name of the record created by the earlier seed row "{0}"').format(label),
+			group: 'seed',
+		})
+		for (const { key: fieldname } of parseNavParamsJson(record.field_values || '')) {
+			if (!fieldname) continue
+			seedTokens.push({
+				value: `{${label}.${fieldname}}`,
+				description: __('Field "{0}" of the record created by the earlier seed row "{1}"').format(
+					fieldname,
+					label,
+				),
+				group: 'seed',
+			})
+		}
+	}
+	return [...CRITERION_TOKENS, ...seedTokens]
+}
 
 export const STEP_TOKENS = [...SESSION_TOKENS, ...SESSION_DATA_TOKENS]
 
 export const NAV_TOKENS = [
 	{ value: '{company_name}', description: __('Generated company name'), group: 'session' },
+	{ value: '{company_abbr}', description: __('Short company abbreviation (e.g. "PG5NU")'), group: 'session' },
 	{ value: '{username}', description: __("Student's login"), group: 'session' },
 	...SESSION_DATA_TOKENS,
 ]
 
 export const CRITERION_TOKENS = [
 	{ value: '{company_name}', description: __('Generated company name for this student'), group: 'session' },
+	{ value: '{company_abbr}', description: __('Short company abbreviation (e.g. "PG5NU")'), group: 'session' },
 	{ value: '{username}', description: __("Student's login on the external system"), group: 'session' },
 	...SESSION_DATA_TOKENS,
 ]
@@ -58,6 +97,7 @@ export const PREVIEW_SAMPLE_DATA = {
 	username: 'preview.user',
 	password: 'preview123',
 	company_name: 'Lab_preview_user',
+	company_abbr: 'PREVW',
 	url: 'https://erp.example.com',
 	customer_name: 'Firma Przykładowa Sp. z o.o. [preview]',
 	customer_type: 'Company',
@@ -79,6 +119,8 @@ export const PREVIEW_SAMPLE_DATA = {
 	item_price: '2499.00',
 	order_qty: '5',
 	discount_pct: '10',
+	lead_first: 'Piotr',
+	lead_company: 'Wisła Sp. z o.o. [preview]',
 }
 
 export function resolveLabPlaceholders(text, data = PREVIEW_SAMPLE_DATA) {

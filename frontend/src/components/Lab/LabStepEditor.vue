@@ -171,7 +171,9 @@ const doctypeOptions = computed(() => {
 	const opts = (props.externalDoctypes || []).map((name) => ({ label: name, value: name }))
 	const q = doctypeQuery.value.trim()
 	if (q && !opts.some((o) => o.value.toLowerCase() === q.toLowerCase())) {
-		opts.unshift({ label: __('Use "{0}"').format(q), value: q })
+		// label must equal value — a decorated label causes an infinite resync loop with
+		// doctypeQuery below, freezing the tab.
+		opts.unshift({ label: q, value: q })
 	}
 	return opts
 })

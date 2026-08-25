@@ -88,6 +88,7 @@ declare module 'vue' {
     LabConnectionForm: typeof import('./src/components/Settings/LabConnectionForm.vue')['default']
     LabCriterionEditor: typeof import('./src/components/Lab/LabCriterionEditor.vue')['default']
     LabPreviewPanel: typeof import('./src/components/Lab/LabPreviewPanel.vue')['default']
+    LabSeedRecordEditor: typeof import('./src/components/Lab/LabSeedRecordEditor.vue')['default']
     LabSettings: typeof import('./src/components/Settings/LabSettings.vue')['default']
     LabStepEditor: typeof import('./src/components/Lab/LabStepEditor.vue')['default']
     LabSubmissionResult: typeof import('./src/components/LabSubmissionResult.vue')['default']

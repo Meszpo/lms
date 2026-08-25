@@ -1,20 +1,25 @@
 <template>
-	<div class="space-y-2">
-		<div v-for="group in visibleGroups" :key="group.id" class="flex flex-wrap gap-1.5 items-center">
-			<span class="text-xs font-medium text-ink-gray-5 w-full">{{ group.label }}</span>
-			<button
-				v-for="t in group.tokens"
-				:key="t.value"
-				type="button"
-				:title="tokenTitle(t)"
-				class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-mono bg-surface-gray-2 hover:bg-surface-blue-2 text-ink-gray-7 hover:text-ink-blue-6 border border-outline-gray-2 hover:border-outline-blue-2 transition-colors cursor-pointer"
-				@click="emit('insert', t.value)"
-			>
-				<span>{{ t.value }}</span>
-				<span v-if="t.example" class="text-ink-gray-4 font-sans normal-case">→ {{ t.example }}</span>
-			</button>
+	<details>
+		<summary class="cursor-pointer select-none text-xs font-medium text-ink-gray-5">
+			{{ __('Variables ({0})').format(tokens.length) }}
+		</summary>
+		<div class="space-y-2 mt-1.5">
+			<div v-for="group in visibleGroups" :key="group.id" class="flex flex-wrap gap-1.5 items-center">
+				<span class="text-xs font-medium text-ink-gray-5 w-full">{{ group.label }}</span>
+				<button
+					v-for="t in group.tokens"
+					:key="t.value"
+					type="button"
+					:title="tokenTitle(t)"
+					class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-mono bg-surface-gray-2 hover:bg-surface-blue-2 text-ink-gray-7 hover:text-ink-blue-6 border border-outline-gray-2 hover:border-outline-blue-2 transition-colors cursor-pointer"
+					@click="emit('insert', t.value)"
+				>
+					<span>{{ t.value }}</span>
+					<span v-if="t.example" class="text-ink-gray-4 font-sans normal-case">→ {{ t.example }}</span>
+				</button>
+			</div>
 		</div>
-	</div>
+	</details>
 </template>
 
 <script setup>
