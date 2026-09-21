@@ -152,7 +152,7 @@
 						</div>
 						<!-- Password -->
 						<div class="flex items-center gap-1 min-w-0">
-							<span class="text-xs text-ink-gray-5 shrink-0">{{ __('Pass') }}:</span>
+							<span class="text-xs text-ink-gray-5 shrink-0">{{ __('Password') }}:</span>
 							<code class="text-xs font-mono truncate min-w-0 flex-1">{{ showPassword ? instance.external_password : '••••••' }}</code>
 							<button class="text-ink-blue-6 hover:text-ink-blue-7 shrink-0" @click="showPassword = !showPassword">
 								<Eye v-if="!showPassword" class="size-3" />
