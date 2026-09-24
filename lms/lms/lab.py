@@ -720,8 +720,10 @@ def _create_seed_records(lab_doc, base_url, admin_key, admin_secret, company_nam
 			)
 
 		payload = {k: _apply_substitutions_deep(v, subs) for k, v in raw_values.items()}
-		# Force the owner so the record is visible under the student's owner-isolated role.
-		payload["owner"] = ext_username
+		# NOTE: `owner` can't be forced here — Frappe overwrites it with the session user
+		# (the admin API key) on insert and rejects changing it afterwards. Owner-isolated
+		# student roles (see ensure_role_isolation) would therefore never see the record,
+		# so it is shared with the student explicitly below instead.
 
 		resp = _external_request(
 			"POST", f"{base_url}/api/resource/{row.target_doctype}", admin_key, admin_secret, json=payload
@@ -738,6 +740,29 @@ def _create_seed_records(lab_doc, base_url, admin_key, admin_secret, company_nam
 		created_name = created_doc.get("name")
 		subs[row.label] = session_data[row.label] = created_name
 		created.append({"doctype": row.target_doctype, "name": created_name})
+
+		# A DocShare grants the student read/write on this one document even though the
+		# role is restricted to own documents (if_owner); it's removed with the document.
+		share_resp = _external_request(
+			"POST",
+			f"{base_url}/api/method/frappe.share.add",
+			admin_key,
+			admin_secret,
+			json={
+				"doctype": row.target_doctype,
+				"name": created_name,
+				"user": ext_username,
+				"read": 1,
+				"write": 1,
+			},
+		)
+		if share_resp.status_code not in (200, 201):
+			raise SeedRecordCreationError(
+				_("Failed to share {0} '{1}' with the student: {2}").format(
+					row.target_doctype, row.label, _external_error_detail(share_resp)
+				),
+				created,
+			)
 
 		for fieldname, value in created_doc.items():
 			if value is None or isinstance(value, (dict, list)):
