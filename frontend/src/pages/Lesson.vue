@@ -1528,7 +1528,7 @@ const confirmAndOpenLab = () => {
 
 	// Open both windows in the same call stack so popup blocker allows both.
 	const sysWin = window.open('', 'lms_lab_system',
-		`width=${labW},height=${screenH},left=${monitorLeft},top=${monitorTop},resizable=yes`)
+		`width=${labW},height=${screenH},left=${monitorLeft},top=${monitorTop},resizable=yes,toolbar=yes,location=yes`)
 	if (sysWin) {
 		sysWin.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Starting lab environment…</title><style>*{margin:0;padding:0;box-sizing:border-box}body{display:flex;align-items:center;justify-content:center;height:100vh;font-family:system-ui,sans-serif;background:#f8fafc;color:#374151}.wrap{text-align:center}.spinner{width:52px;height:52px;border:4px solid #e5e7eb;border-top-color:#3b82f6;border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 20px}@keyframes spin{to{transform:rotate(360deg)}}h1{font-size:1.1rem;font-weight:600;color:#111827;margin-bottom:8px}p{font-size:.875rem;color:#6b7280;line-height:1.5}</style></head><body><div class="wrap"><div class="spinner"></div><h1>Starting lab environment…</h1><p>Please wait. The system will open automatically.</p></div></body></html>`)
 		sysWin.document.close()

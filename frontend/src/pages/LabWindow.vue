@@ -558,7 +558,7 @@ function openLabSystem() {
 	const screenH = window.screen.availHeight
 	const labW = Math.max(screenW - panelW - 8, 800)
 	labSystemWindow = window.open(url, 'lms_lab_system',
-		`width=${labW},height=${screenH},left=0,top=0,resizable=yes`)
+		`width=${labW},height=${screenH},left=0,top=0,resizable=yes,toolbar=yes,location=yes`)
 	if (labSystemWindow) {
 		systemOpened.value = true
 	} else {
