@@ -421,24 +421,49 @@ def ensure_role_isolation(lab_doc) -> None:
 
 def _external_error_detail(resp) -> str:
 	"""
-	Build a safe, human-readable detail for a failed external-system response.
+	Build a safe, human-readable detail for a failed external-system response, and log
+	the full detail (including the complete traceback, when the external system sends
+	one) to *this* system's Error Log — so a failure is diagnosable from here even when
+	nobody has Error Log / console access on the external system, or it isn't logged
+	there for some reason (e.g. Error Log clearing, a dedup rule, a config difference).
 	A genuine Frappe validation error comes back as JSON with `_server_messages`;
 	anything else (an HTML error page from a crashed backend, a proxy's 502/503/504)
 	means the lab system itself is unavailable, so its raw body is never shown to
 	the student/instructor.
 	"""
+	short_message = _("the lab system is temporarily unavailable (HTTP {0})").format(resp.status_code)
 	try:
 		data = resp.json()
-		server_messages = json.loads(data.get("_server_messages") or "[]")
-		if server_messages:
-			message = json.loads(server_messages[0]).get("message")
-			if message:
-				return message
-		if data.get("exception"):
-			return str(data["exception"]).strip().splitlines()[-1]
-	except (ValueError, TypeError, IndexError, KeyError):
-		pass
-	return _("the lab system is temporarily unavailable (HTTP {0})").format(resp.status_code)
+	except ValueError:
+		data = None
+
+	if data:
+		try:
+			server_messages = json.loads(data.get("_server_messages") or "[]")
+			if server_messages:
+				message = json.loads(server_messages[0]).get("message")
+				if message:
+					short_message = message
+			elif data.get("exception"):
+				short_message = str(data["exception"]).strip().splitlines()[-1]
+		except (ValueError, TypeError, IndexError, KeyError):
+			pass
+
+		# `exc` (set only when the external system allows tracebacks) carries the full
+		# stack trace(s) as a JSON-encoded list of strings — `exception` is just its last line.
+		full_tracebacks = None
+		try:
+			full_tracebacks = json.loads(data.get("exc") or "null")
+		except (ValueError, TypeError):
+			pass
+
+		if full_tracebacks or data.get("exception"):
+			frappe.log_error(
+				title=f"LMS Lab: external system error (HTTP {resp.status_code})",
+				message="\n\n".join(full_tracebacks) if full_tracebacks else json.dumps(data, indent=2),
+			)
+
+	return short_message
 
 
 def _slugify(text: str) -> str:
