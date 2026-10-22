@@ -688,6 +688,47 @@ def _step_to_dict(s):
 	}
 
 
+def _share_job_cards_for_work_order(base_url, admin_key, admin_secret, work_order_name, ext_username) -> list:
+	"""
+	Shares every Job Card linked to `work_order_name` with the student, not just the
+	ones explicitly listed as Seed Records. ERPNext's Work Order can create its own
+	Job Cards as a side effect (e.g. on submit, or when operations are missing one) —
+	those are owned by the admin API user, not the student, so under the if_owner
+	restriction set by ensure_role_isolation they'd otherwise stay invisible to the
+	student despite belonging to their own (isolated) Work Order.
+
+	Returns the {"doctype", "name"} pairs newly shared, for the caller to track for cleanup.
+	"""
+	resp = _raw_external_request(
+		"GET",
+		f"{base_url}/api/resource/Job Card",
+		admin_key,
+		admin_secret,
+		params={
+			"filters": json.dumps([["work_order", "=", work_order_name]]),
+			"fields": json.dumps(["name"]),
+			"limit_page_length": 0,
+		},
+		timeout=30,
+	)
+	if resp.status_code != 200:
+		return []
+
+	shared = []
+	for row in resp.json().get("data", []):
+		name = row["name"]
+		share_resp = _external_request(
+			"POST",
+			f"{base_url}/api/method/frappe.share.add",
+			admin_key,
+			admin_secret,
+			json={"doctype": "Job Card", "name": name, "user": ext_username, "read": 1, "write": 1},
+		)
+		if share_resp.status_code in (200, 201):
+			shared.append({"doctype": "Job Card", "name": name})
+	return shared
+
+
 class SeedRecordCreationError(Exception):
 	"""Raised by _create_seed_records on failure. Carries the records already created
 	so the caller can persist them for cleanup instead of orphaning them."""
@@ -711,6 +752,7 @@ def _create_seed_records(lab_doc, base_url, admin_key, admin_secret, company_nam
 	"""
 	subs = {"company_name": company_name, "username": ext_username, **session_data}
 	created = []
+	work_order_names = []
 	for row in getattr(lab_doc, "seed_records", None) or []:
 		try:
 			raw_values = json.loads(row.field_values or "{}")
@@ -768,6 +810,22 @@ def _create_seed_records(lab_doc, base_url, admin_key, admin_secret, company_nam
 			if value is None or isinstance(value, (dict, list)):
 				continue  # no sensible string form for a {placeholder}
 			subs[f"{row.label}.{fieldname}"] = session_data[f"{row.label}.{fieldname}"] = str(value)
+
+		if row.target_doctype == "Work Order":
+			work_order_names.append(created_name)
+
+	# Sweep for Job Cards tied to the seeded Work Order(s) at the end, after every seed
+	# row has run — not just the Job Cards explicitly listed in Seed Records. ERPNext can
+	# create its own Job Cards for a Work Order as a side effect (e.g. on submit), owned by
+	# the admin API user rather than the student; without this they'd stay invisible to the
+	# student under the if_owner restriction set by ensure_role_isolation.
+	already_created = {(c["doctype"], c["name"]) for c in created}
+	for work_order_name in work_order_names:
+		for entry in _share_job_cards_for_work_order(base_url, admin_key, admin_secret, work_order_name, ext_username):
+			key = (entry["doctype"], entry["name"])
+			if key not in already_created:
+				already_created.add(key)
+				created.append(entry)
 
 	return created
 
