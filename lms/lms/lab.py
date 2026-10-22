@@ -688,6 +688,25 @@ def _step_to_dict(s):
 	}
 
 
+def _share_doc(base_url, admin_key, admin_secret, doctype, name, ext_username):
+	"""
+	Shares a document with the student, granting submit rights too when the doctype
+	supports them. `frappe.share.add` throws if `submit=1` is passed for a doctype that
+	isn't submittable, so try with it first and fall back to read/write only on that
+	specific error rather than hand-maintain a list of which seeded doctypes submit.
+	"""
+	payload = {"doctype": doctype, "name": name, "user": ext_username, "read": 1, "write": 1, "submit": 1}
+	resp = _external_request(
+		"POST", f"{base_url}/api/method/frappe.share.add", admin_key, admin_secret, json=payload
+	)
+	if resp.status_code not in (200, 201) and "not submittable" in _external_error_detail(resp).lower():
+		payload.pop("submit")
+		resp = _external_request(
+			"POST", f"{base_url}/api/method/frappe.share.add", admin_key, admin_secret, json=payload
+		)
+	return resp
+
+
 def _share_job_cards_for_work_order(base_url, admin_key, admin_secret, work_order_name, ext_username) -> list:
 	"""
 	Shares every Job Card linked to `work_order_name` with the student, not just the
@@ -717,13 +736,7 @@ def _share_job_cards_for_work_order(base_url, admin_key, admin_secret, work_orde
 	shared = []
 	for row in resp.json().get("data", []):
 		name = row["name"]
-		share_resp = _external_request(
-			"POST",
-			f"{base_url}/api/method/frappe.share.add",
-			admin_key,
-			admin_secret,
-			json={"doctype": "Job Card", "name": name, "user": ext_username, "read": 1, "write": 1, "submit": 1},
-		)
+		share_resp = _share_doc(base_url, admin_key, admin_secret, "Job Card", name, ext_username)
 		if share_resp.status_code in (200, 201):
 			shared.append({"doctype": "Job Card", "name": name})
 	return shared
@@ -785,20 +798,9 @@ def _create_seed_records(lab_doc, base_url, admin_key, admin_secret, company_nam
 
 		# A DocShare grants the student read/write/submit on this one document even though
 		# the role is restricted to own documents (if_owner); it's removed with the document.
-		share_resp = _external_request(
-			"POST",
-			f"{base_url}/api/method/frappe.share.add",
-			admin_key,
-			admin_secret,
-			json={
-				"doctype": row.target_doctype,
-				"name": created_name,
-				"user": ext_username,
-				"read": 1,
-				"write": 1,
-				"submit": 1,
-			},
-		)
+		# `submit` only applies to submittable doctypes — frappe.share.add throws for the
+		# rest (Item, Customer, ...), so retry without it rather than hand-maintain a list.
+		share_resp = _share_doc(base_url, admin_key, admin_secret, row.target_doctype, created_name, ext_username)
 		if share_resp.status_code not in (200, 201):
 			raise SeedRecordCreationError(
 				_("Failed to share {0} '{1}' with the student: {2}").format(
