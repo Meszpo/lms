@@ -722,7 +722,7 @@ def _share_job_cards_for_work_order(base_url, admin_key, admin_secret, work_orde
 			f"{base_url}/api/method/frappe.share.add",
 			admin_key,
 			admin_secret,
-			json={"doctype": "Job Card", "name": name, "user": ext_username, "read": 1, "write": 1},
+			json={"doctype": "Job Card", "name": name, "user": ext_username, "read": 1, "write": 1, "submit": 1},
 		)
 		if share_resp.status_code in (200, 201):
 			shared.append({"doctype": "Job Card", "name": name})
@@ -783,8 +783,8 @@ def _create_seed_records(lab_doc, base_url, admin_key, admin_secret, company_nam
 		subs[row.label] = session_data[row.label] = created_name
 		created.append({"doctype": row.target_doctype, "name": created_name})
 
-		# A DocShare grants the student read/write on this one document even though the
-		# role is restricted to own documents (if_owner); it's removed with the document.
+		# A DocShare grants the student read/write/submit on this one document even though
+		# the role is restricted to own documents (if_owner); it's removed with the document.
 		share_resp = _external_request(
 			"POST",
 			f"{base_url}/api/method/frappe.share.add",
@@ -796,6 +796,7 @@ def _create_seed_records(lab_doc, base_url, admin_key, admin_secret, company_nam
 				"user": ext_username,
 				"read": 1,
 				"write": 1,
+				"submit": 1,
 			},
 		)
 		if share_resp.status_code not in (200, 201):
