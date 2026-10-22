@@ -195,6 +195,76 @@ def get_external_doctypes(lab_connection: str) -> list:
 	return found or list(SESSION_DOCTYPES)
 
 
+def _doctype_fields_from_meta(meta, skip_types) -> list:
+	return [
+		{
+			"fieldname": df.fieldname,
+			"label": df.label or df.fieldname,
+			"fieldtype": df.fieldtype,
+			"options": df.options or "",
+			"reqd": bool(df.reqd),
+		}
+		for df in meta.fields
+		if df.fieldname and df.fieldtype not in skip_types
+	]
+
+
+def _fetch_external_doctype_fields(
+	base_url, admin_key, admin_secret, doctype: str, include_table_fields: bool = False
+) -> list | None:
+	"""Returns field metadata for a DocType on the "external" lab system, or None if it
+	couldn't be found there either (unknown doctype, connection hiccup, ...) — callers that
+	validate rather than display should treat None as "skip, don't block on a hiccup".
+	Table / Table MultiSelect are layout noise for the picker UI (hence excluded by
+	default), but a caller that needs to recurse into child-table rows (e.g. the seed
+	record type validator) wants them, so it can opt in via `include_table_fields`.
+
+	Prefers the SAME doctype's meta locally when it happens to be installed here too
+	(e.g. erpnext alongside lms in a combined deployment) — no network round trip, always
+	fresh, no caching concerns. Otherwise falls back to a REST call against the external
+	system, cached for a while so validating a lab with many Seed Records (or re-saving it
+	repeatedly) doesn't re-fetch the same DocType's metadata over and over.
+	"""
+	skip_types = _SKIP_FIELD_TYPES - {"Table", "Table MultiSelect"} if include_table_fields else _SKIP_FIELD_TYPES
+
+	if frappe.db.exists("DocType", doctype):
+		try:
+			return _doctype_fields_from_meta(frappe.get_meta(doctype), skip_types)
+		except Exception:
+			pass  # fall through to the external REST lookup
+
+	cache_key = f"lms_lab_ext_doctype_fields::{base_url}::{doctype}::{int(include_table_fields)}"
+	cached = frappe.cache().get_value(cache_key)
+	if cached is not None:
+		return cached or None  # cached "miss" is stored as [] (falsy), see below
+
+	resp = _raw_external_request(
+		"GET",
+		f"{base_url}/api/resource/DocType/{doctype}",
+		admin_key,
+		admin_secret,
+		timeout=15,
+	)
+	if resp.status_code != 200:
+		frappe.cache().set_value(cache_key, [], expires_in_sec=120)  # short TTL: a hiccup shouldn't stick around
+		return None
+
+	raw_fields = (resp.json().get("data") or {}).get("fields") or []
+	fields = [
+		{
+			"fieldname": f.get("fieldname"),
+			"label": f.get("label") or f.get("fieldname"),
+			"fieldtype": f.get("fieldtype"),
+			"options": f.get("options") or "",
+			"reqd": bool(f.get("reqd")),
+		}
+		for f in raw_fields
+		if f.get("fieldname") and f.get("fieldtype") not in skip_types
+	]
+	frappe.cache().set_value(cache_key, fields, expires_in_sec=3600)
+	return fields
+
+
 @frappe.whitelist()
 def get_doctype_fields(lab_connection: str, doctype: str) -> list:
 	"""Returns field metadata for a DocType on the external lab system."""
@@ -206,28 +276,10 @@ def get_doctype_fields(lab_connection: str, doctype: str) -> list:
 		frappe.throw(_("DocType is required."))
 
 	base_url, admin_key, admin_secret = _load_connection(lab_connection)
-	resp = _raw_external_request(
-		"GET",
-		f"{base_url}/api/resource/DocType/{doctype}",
-		admin_key,
-		admin_secret,
-		timeout=15,
-	)
-	if resp.status_code != 200:
+	fields = _fetch_external_doctype_fields(base_url, admin_key, admin_secret, doctype)
+	if fields is None:
 		frappe.throw(_("Could not fetch fields for DocType '{0}'.").format(doctype))
-
-	fields = (resp.json().get("data") or {}).get("fields") or []
-	return [
-		{
-			"fieldname": f.get("fieldname"),
-			"label": f.get("label") or f.get("fieldname"),
-			"fieldtype": f.get("fieldtype"),
-			"options": f.get("options") or "",
-			"reqd": bool(f.get("reqd")),
-		}
-		for f in fields
-		if f.get("fieldname") and f.get("fieldtype") not in _SKIP_FIELD_TYPES
-	]
+	return fields
 
 
 @frappe.whitelist()

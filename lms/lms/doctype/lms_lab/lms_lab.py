@@ -8,11 +8,25 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 
-from lms.lms.lab import RESERVED_SESSION_PLACEHOLDERS, ensure_role_isolation, validate_lab_roles
+from lms.lms.lab import (
+	RESERVED_SESSION_PLACEHOLDERS,
+	_fetch_external_doctype_fields,
+	_load_connection,
+	ensure_role_isolation,
+	validate_lab_roles,
+)
 
 # Matches {label} and {label.fieldname} placeholder syntax.
 _PLACEHOLDER_RE = re.compile(r"\{[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)?\}")
 _LABEL_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+
+# Fieldtypes that must arrive as a real JSON number/bool, never a quoted string. A
+# {placeholder} always substitutes to a string (see _apply_substitutions in lab.py), so
+# these fields must always be given as a literal JSON number — even a placeholder here
+# would still break at provisioning time once substituted.
+_NUMERIC_FIELDTYPES = {"Int", "Float", "Currency", "Percent", "Check"}
+# Standard Frappe meta fields that aren't in meta.fields but still carry a strict type.
+_STANDARD_FIELD_TYPES = {"docstatus": "Int", "idx": "Int"}
 
 
 class LMSLab(Document):
@@ -35,6 +49,15 @@ class LMSLab(Document):
 
 	def validate_seed_records(self):
 		seen_labels = set()
+
+		connection = None
+		if self.lab_connection:
+			try:
+				connection = _load_connection(self.lab_connection)
+			except Exception:
+				connection = None  # unreachable/misconfigured connection — skip type checks, not Seed Record editing
+		meta_cache = {}
+
 		for row in self.seed_records or []:
 			label = (row.label or "").strip()
 			if not label:
@@ -68,6 +91,15 @@ class LMSLab(Document):
 					).format(label)
 				)
 
+			if connection and row.target_doctype:
+				type_errors = []
+				_validate_field_types(row.target_doctype, parsed_values, type_errors, *connection, meta_cache)
+				if type_errors:
+					frappe.throw(
+						_("Seed record '{0}': {1}").format(label, "<br>".join(type_errors)),
+						title=_("Field type mismatch"),
+					)
+
 	def has_role_changes(self) -> bool:
 		"""
 		True when the configured roles differ from what's saved in the database (or this
@@ -90,3 +122,62 @@ class LMSLab(Document):
 		old_doctypes = {r.target_doctype for r in (before.seed_records or [])} if before else set()
 		new_doctypes = {r.target_doctype for r in (self.seed_records or [])}
 		return old_doctypes != new_doctypes
+
+
+def _validate_field_types(doctype, values, errors, base_url, admin_key, admin_secret, meta_cache, path=""):
+	"""
+	Recursively checks a parsed Field Values dict against the external system's DocType
+	metadata: Int/Float/Currency/Percent/Check fields must be real JSON numbers/booleans,
+	never quoted strings — a {placeholder} always substitutes to a string (see
+	_apply_substitutions in lab.py), so even a templated value would break the same way
+	once substituted. This is exactly the class of bug that silently produces a
+	`TypeError: '<=' not supported between instances of 'str' and 'int'` deep inside the
+	external system's own validation, long after Seed Records were saved here.
+	Recurses into Table / Table MultiSelect child rows using the child DocType's fields.
+	Best-effort: an unreachable/unknown doctype is skipped rather than blocking the save.
+	"""
+	if doctype not in meta_cache:
+		meta_cache[doctype] = _fetch_external_doctype_fields(
+			base_url, admin_key, admin_secret, doctype, include_table_fields=True
+		)
+	fields = meta_cache[doctype]
+	if fields is None:
+		return
+	fields_by_name = {f["fieldname"]: f for f in fields}
+
+	for fieldname, value in values.items():
+		field = fields_by_name.get(fieldname)
+		fieldtype = field["fieldtype"] if field else _STANDARD_FIELD_TYPES.get(fieldname)
+		if not fieldtype:
+			continue
+
+		if fieldtype in _NUMERIC_FIELDTYPES:
+			if isinstance(value, bool) or isinstance(value, (int, float)):
+				continue
+			if isinstance(value, str):
+				errors.append(
+					_(
+						"field '{0}' is a {1} field but got the quoted text \"{2}\" instead of a "
+						"plain JSON number — write {0}: {2} (no quotes), not {0}: \"{2}\"."
+					).format(f"{path}{fieldname}", fieldtype, value)
+				)
+			else:
+				errors.append(
+					_("field '{0}' is a {1} field but got {2}.").format(
+						f"{path}{fieldname}", fieldtype, type(value).__name__
+					)
+				)
+		elif fieldtype in ("Table", "Table MultiSelect") and field and field.get("options"):
+			if isinstance(value, list):
+				for i, child_row in enumerate(value):
+					if isinstance(child_row, dict):
+						_validate_field_types(
+							field["options"],
+							child_row,
+							errors,
+							base_url,
+							admin_key,
+							admin_secret,
+							meta_cache,
+							path=f"{path}{fieldname}[{i}].",
+						)
