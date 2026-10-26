@@ -967,6 +967,42 @@ def _get_lab_doc(lab: str):
 		return doc
 
 
+def _set_default_operating_cost_account(base_url, admin_key, admin_secret, company_name):
+	"""Set Company.default_operating_cost_account on the external system.
+
+	Stock Entry (Manufacture) additional costs from Job Card time logs use this account;
+	ERPNext does not fill it when a company is created. Best-effort: a missing account
+	(custom chart) must not block provisioning.
+	"""
+	resp = _external_request(
+		"GET",
+		f"{base_url}/api/resource/Account",
+		admin_key,
+		admin_secret,
+		params={
+			"filters": json.dumps(
+				[
+					["company", "=", company_name],
+					["account_type", "=", "Expenses Included In Valuation"],
+					["is_group", "=", 0],
+				]
+			),
+			"fields": json.dumps(["name"]),
+			"limit_page_length": 1,
+		},
+	)
+	accounts = resp.json().get("data") if resp.status_code == 200 else None
+	if not accounts:
+		return
+	_external_request(
+		"PUT",
+		f"{base_url}/api/resource/Company/{company_name}",
+		admin_key,
+		admin_secret,
+		json={"default_operating_cost_account": accounts[0]["name"]},
+	)
+
+
 def provision_lab_instance(lab: str, course: str, lesson: str):
 	"""
 	Creates or returns an existing Active lab instance for the current user.
@@ -1128,6 +1164,7 @@ def provision_lab_instance(lab: str, course: str, lesson: str):
 		)
 		if resp.status_code not in (200, 201, 409):
 			frappe.throw(_("Failed to create company: {0}").format(_external_error_detail(resp)))
+		_set_default_operating_cost_account(base_url, admin_key, admin_secret, company_name)
 
 		# 2. Create User on external system; if already exists update password instead
 		configured_roles = [{"role": r.role} for r in (getattr(lab_doc, "roles", None) or [])]
